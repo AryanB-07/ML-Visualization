@@ -281,5 +281,8 @@ class SurfaceModel:
         A, B = np.meshgrid(a, b)  # rows = b, cols = a (plotly's surface convention)
         q = np.stack([A.ravel(), B.ravel()], 1)
         z = self(q).reshape(A.shape)
-        supported = (self.nearest_distance(q) <= 0.75 * s * u).reshape(A.shape)
+        # "Supported" = at least three evaluations within 1.5 target cells, i.e. the region is
+        # sampled at about the requested resolution.  A lone coarse point does not qualify.
+        counts = self.tree.query_ball_point(q, r=1.5 * s * u, return_length=True)
+        supported = (counts >= 3).reshape(A.shape)
         return {"a": a, "b": b, "z": z, "supported": supported}

@@ -59,6 +59,7 @@ class Recorder:
         self._last_loss: float | None = None
         self._last_saved = -1
         self._finished = False
+        self._warned_nonfinite = False
         self._prev: torch.Tensor | None = flatten_params(model) if save_forget_deltas else None
         if initial_snapshot:
             self._snapshot(None)
@@ -66,8 +67,16 @@ class Recorder:
             self._last_saved = 0
 
     def _snapshot(self, loss: float | None) -> None:
+        params = flatten_params(self.model)
+        if not bool(torch.isfinite(params).all()):
+            # NaN/inf weights have no position in weight space and would poison every projection.
+            if not self._warned_nonfinite:
+                print(f"[trajmap] weights are non-finite at step {self.step_count}; snapshot skipped "
+                      "(further non-finite snapshots are skipped silently)")
+                self._warned_nonfinite = True
+            return
         fb, ib = flatten_buffers(self.model)
-        self.writer.save_snapshot(self.step_count, flatten_params(self.model), fb, ib, loss=loss)
+        self.writer.save_snapshot(self.step_count, params, fb, ib, loss=loss)
         self._last_saved = self.step_count
         if self.max_snapshots and len(self.writer._records) > self.max_snapshots:
             self.writer.thin()

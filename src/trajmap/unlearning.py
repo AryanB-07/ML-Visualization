@@ -70,12 +70,17 @@ def list_methods() -> list[str]:
 
 @register_method("gradient_ascent")
 class GradientAscent(UnlearningMethod):
-    """Plain SGD ascent on the forget-set loss.  Config: ``lr`` (0.01), ``steps`` (40)."""
+    """Plain SGD ascent on the forget-set loss.
+
+    Config: ``lr`` (0.01), ``steps`` (40), ``max_loss`` (10.0; ascent is unbounded,
+    so stop once the forget loss passes this).
+    """
 
     def setup(self, model, forget_loader, retain_loader, config):
         self.loader, self.it = forget_loader, iter(forget_loader)
         self.opt = torch.optim.SGD(model.parameters(), lr=config.get("lr", 0.01))
         self.steps, self.done = config.get("steps", 40), 0
+        self.max_loss, self.last = config.get("max_loss", 10.0), 0.0
 
     def step(self, model):
         try:
@@ -89,10 +94,11 @@ class GradientAscent(UnlearningMethod):
         (-loss).backward()
         self.opt.step()
         self.done += 1
-        return {"loss": loss.item()}
+        self.last = loss.item()
+        return {"loss": self.last}
 
     def is_done(self):
-        return self.done >= self.steps
+        return self.done >= self.steps or not self.last <= self.max_loss
 
 
 def loaders_from_run(run: Run, batch_size: int = 64, seed: int = 0) -> tuple[DataLoader, DataLoader | None]:
@@ -143,10 +149,24 @@ def run_unlearning(run: Run | str, method: str, from_step: int,
     writer = run.create_branch(branch, from_step, method=method, config=config, every_n_steps=every_n_steps)
     rec = Recorder(model, writer, every_n_steps, initial_snapshot=False)
     m.setup(model, forget_loader, retain_loader, config)
+    stopped = None
     while not m.is_done() and rec.step_count < max_steps:
         out = dict(m.step(model))
+        loss = out.get("loss")
+        if (loss is not None and not np.isfinite(loss)) or not all(
+                bool(torch.isfinite(p).all()) for p in model.parameters()):
+            # Non-finite weights have no position in weight space; keep the last finite snapshot instead.
+            stopped = f"loss or weights became non-finite at method step {rec.step_count + 1}"
+            snap = writer.load(writer.steps()[-1])
+            assign_params(model, snap.params)
+            assign_buffers(model, snap.buffers, snap.int_buffers)
+            rec.step_count = rec._last_saved
+            print(f"[trajmap] {branch}: {stopped}; branch ends at its last finite snapshot")
+            break
         rec.step(loss=out.pop("loss", None), **out)
     rec.finish()
+    if stopped:
+        writer.set_info(stopped=stopped)
 
     if metrics:
         from .metrics import compute_metrics

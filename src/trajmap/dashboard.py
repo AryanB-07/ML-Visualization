@@ -27,7 +27,7 @@ from .worker import ensure_worker, worker_status
 INK, MUTED, GRID, SURFACE_BG = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 BRANCH_COLORS = ["#eb6834", "#1baf7a", "#6250d6", "#e87ba4", "#eda100", "#008300", "#e34948"]
 LOSS_SCALE = [[0.0, "#e3eefb"], [0.5, "#6ba6e6"], [1.0, "#12407c"]]
-GRAY_SCALE = [[0.0, "#d9d8d3"], [1.0, "#a9a8a2"]]
+GRAY_SCALE = [[0.0, "#e6e5e0"], [1.0, "#b4b3ad"]]
 MODE_LABELS = {"pca_trunk": "PCA, trunk only", "pca_joint": "PCA, trunk + branches",
                "random": "Random, filter-normalized"}
 FONT = dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif", size=12, color=INK)
@@ -166,7 +166,7 @@ def map_figure(st: DashboardState, view: dict[str, Any], sel_step: int | None, l
         if interp.any():
             fig.add_trace(go.Surface(
                 x=mesh["a"], y=mesh["b"], z=np.where(interp, z, np.nan), colorscale=GRAY_SCALE, showscale=False,
-                opacity=0.55, name="Surface, interpolated", showlegend=True,
+opacity=0.45, name="Surface, interpolated", showlegend=True,
                 hovertemplate=hover + "interpolated, not evaluated</extra>",
                 lighting=dict(ambient=0.9, diffuse=0.2, specular=0.0)))
         u = unit(info["coarse_h"])
@@ -213,7 +213,7 @@ def map_figure(st: DashboardState, view: dict[str, Any], sel_step: int | None, l
         scene=dict(xaxis=dict(title="a (direction 1)", **axis), yaxis=dict(title="b (direction 2)", **axis),
                    zaxis=dict(title="loss", type="log" if zlog else "linear", **axis),
                    aspectmode="manual", aspectratio=dict(x=1.2, y=1.2, z=0.7),
-                   camera=dict(eye=dict(x=1.35, y=-1.45, z=0.95))))
+                   camera=dict(eye=dict(x=1.1, y=-1.25, z=1.55))))
     return fig
 
 
@@ -234,8 +234,10 @@ def fidelity_figure(st: DashboardState, view: dict[str, Any], sel_step: int | No
                                  "<br>residual norm %{customdata[1]:.3g}<extra></extra>"))
     if sel_step is not None:
         fig.add_vline(x=sel_step, line=dict(color=MUTED, width=1, dash="dot"))
-    fig.update_layout(height=230, margin=dict(l=44, r=10, t=8, b=36), paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG,
-                      font=FONT, showlegend=len(fig.data) > 1, legend=dict(orientation="h", y=-0.28, font=dict(size=10)),
+    multi = len(fig.data) > 1
+    fig.update_layout(height=270 if multi else 230, margin=dict(l=44, r=10, t=44 if multi else 8, b=36),
+                      paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT, showlegend=multi,
+                      legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(size=10)),
                       xaxis=dict(title="step (branches offset by their start step)", gridcolor=GRID, zeroline=False),
                       yaxis=dict(title="captured", range=[-0.03, 1.03], tickformat=".0%", gridcolor=GRID, zeroline=False))
     return fig
@@ -307,7 +309,7 @@ def metrics_figure(st: DashboardState, selected: list[str]) -> go.Figure:
     fig.update_annotations(font=dict(size=12, color=INK), x=0, xanchor="left")
     fig.update_layout(height=150 + 150 * len(selected), margin=dict(l=48, r=10, t=30, b=40), paper_bgcolor=SURFACE_BG,
                       plot_bgcolor=SURFACE_BG, font=FONT, showlegend=True,
-                      legend=dict(orientation="h", y=-0.18 if len(selected) > 1 else -0.35, font=dict(size=10)))
+                      legend=dict(orientation="h", y=1.0, yanchor="bottom", x=1, xanchor="right", font=dict(size=10)))
     return fig
 
 
@@ -354,7 +356,7 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                         dcc.Checklist(id="display", value=["clip", "follow"], options=[
                             {"label": " Log loss axis", "value": "zlog"},
                             {"label": " Clip tall walls (2× max path loss)", "value": "clip"},
-                            {"label": " Follow the latest snapshot", "value": "follow"}],
+                            {"label": " Follow the latest snapshot while the slider is at the end", "value": "follow"}],
                             labelStyle={"display": "block", "margin": "3px 0"}),
                     ], className="card"),
                 ]),
@@ -380,7 +382,9 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                               dcc.Graph(id="fidelity", figure=_empty("…", 230), config={"displayModeBar": False}),
                               html.Div(id="fidelity-text")], className="card"),
                     html.Div([html.H3("Clicked point"),
-                              html.Div(id="click-panel", children=html.Div("Click a point on the surface.", className="note"))],
+                              html.Div(id="click-panel", children=html.Div("Click a point on the surface.", className="note")),
+                              html.Button("Export state_dict (.pt)", id="export", className="btn", n_clicks=0,
+                                          style={"display": "none"})],
                              className="card"),
                 ], className="right"),
             ], className="wrap"),
@@ -406,7 +410,8 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         if start_worker:
             ensure_worker(st.run.dir)
         n = max(len(st.run.trunk.steps()) - 1, 1)
-        new_value = n if ("follow" in (display or []) or value is None or value > n) else value
+        at_end = value is None or value >= (old_max or 0)  # scrubbing back pauses following
+        new_value = n if (("follow" in (display or []) and at_end) or value is None or value > n) else value
         opts = metric_options(st)
         series = no_update
         if opts != old_opts and not old_series:
@@ -448,20 +453,20 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                 fidelity_figure(st, view, sel), fidelity_panel(view, sel), metrics_figure(st, series or []),
                 status, label, sig)
 
-    @app.callback(Output("click-panel", "children"), Output("clicked", "data"),
+    @app.callback(Output("click-panel", "children"), Output("export", "style"), Output("clicked", "data"),
                   Input("map", "clickData"), State("mode", "value"), prevent_initial_call=True)
     def on_click(click, mode):
         if not click or not click.get("points"):
-            return no_update, no_update
+            return no_update, no_update, no_update
         pt = click["points"][0]
         info = st.bm.latest_info(mode)
         if info is None or "x" not in pt:
-            return no_update, no_update
+            return no_update, no_update, no_update
         a, b = float(pt["x"]), float(pt["y"])
         try:
             res, sd = st.in_plane(info["id"], a, b)
         except Exception as e:
-            return html.Div(f"Could not evaluate this point: {e}", className="warn"), None
+            return html.Div(f"Could not evaluate this point: {e}", className="warn"), {"display": "none"}, None
         exports.clear()
         exports[f"{info['id']}:{a}:{b}"] = sd
         rows = [("a, b", f"{a:.4g}, {b:.4g}"), ("Basis", info["id"]), ("Loss", _fmt(res["loss"], 5)),
@@ -474,8 +479,8 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                  html.Div("These weights are center + a·d1 + b·d2, reconstructed from the 2D basis. They are not a "
                           "recorded snapshot, and a snapshot drawn at this spot generally has different weights and loss.",
                           className="note", style={"marginTop": "8px"}),
-                 html.Button("Export state_dict (.pt)", id="export", className="btn", n_clicks=0)]
-        return panel, {"key": f"{info['id']}:{a}:{b}", "a": a, "b": b, "basis": info["id"]}
+]
+        return panel, {"display": "inline-block"}, {"key": f"{info['id']}:{a}:{b}", "a": a, "b": b, "basis": info["id"]}
 
     @app.callback(Output("download", "data"), Input("export", "n_clicks"), State("clicked", "data"),
                   prevent_initial_call=True)
