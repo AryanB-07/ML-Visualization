@@ -24,30 +24,66 @@ from .landscape import RESOLUTIONS, Evaluator, GridCache, SurfaceModel, grid_bou
 from .store import TRUNK, Run, atomic_write_json
 from .worker import ensure_worker, worker_status
 
-INK, MUTED, GRID, SURFACE_BG = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
-BRANCH_COLORS = ["#eb6834", "#1baf7a", "#6250d6", "#e87ba4", "#eda100", "#008300", "#e34948"]
-LOSS_SCALE = [[0.0, "#e3eefb"], [0.5, "#6ba6e6"], [1.0, "#12407c"]]
-GRAY_SCALE = [[0.0, "#e6e5e0"], [1.0, "#b4b3ad"]]
+# Dark wireframe theme: near-black navy ground, electric-blue mesh, white trunk.
+INK, MUTED, GRID, SURFACE_BG = "#e6ecff", "#8793b3", "rgba(140,165,255,0.13)", "rgba(0,0,0,0)"
+PANEL = "#0a1022"                       # opaque stand-in for the card colour (hover labels, legends)
+ACCENT, ACCENT_SOFT = "#3d7bff", "#8fb4ff"
+TRUNK_COLOR = "#ffffff"
+BRANCH_COLORS = ["#d95926", "#9085e9", "#c98500", "#d55181"]  # validated on the dark surface; no greens
+LOSS_SCALE = [[0.0, "#040816"], [0.55, "#0a1c52"], [1.0, "#173a96"]]   # one hue, dark -> bright with loss
+GRAY_SCALE = [[0.0, "#080c18"], [1.0, "#121a30"]]
+WIRE_EVAL, WIRE_INTERP = "rgba(96,150,255,0.95)", "rgba(110,130,185,0.26)"
 MODE_LABELS = {"pca_trunk": "PCA, trunk only", "pca_joint": "PCA, trunk + branches",
                "random": "Random, filter-normalized"}
 FONT = dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif", size=12, color=INK)
 
 CSS = """
-body { margin:0; background:#f4f3f0; color:#0b0b0b; font:14px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; }
+:root {
+  --bg:#04060c; --panel:rgba(10,16,34,.78); --line:rgba(125,165,255,.16); --line-strong:rgba(125,165,255,.34);
+  --text:#e6ecff; --muted:#8793b3; --accent:#3d7bff; --accent-soft:#8fb4ff;
+  --Dash-Fill-Interactive-Strong:#3d7bff; --Dash-Fill-Interactive-Weak:rgba(61,123,255,.10);
+  --Dash-Fill-Inverse-Strong:#0a1022; --Dash-Fill-Primary-Hover:rgba(125,165,255,.10);
+  --Dash-Fill-Primary-Active:rgba(125,165,255,.18); --Dash-Fill-Disabled:rgba(125,165,255,.12);
+  --Dash-Stroke-Strong:rgba(125,165,255,.42); --Dash-Stroke-Weak:rgba(125,165,255,.16);
+  --Dash-Text-Primary:#e6ecff; --Dash-Text-Strong:#ffffff; --Dash-Text-Weak:#8793b3; --Dash-Text-Disabled:#5b6788;
+  --Dash-Shading-Strong:rgba(0,0,0,.6); --Dash-Shading-Weak:rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+html { background:var(--bg); }
+body { margin:0; min-height:100vh; color:var(--text);
+  font:14px 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(900px 520px at 50% -8%, rgba(52,104,255,.30), transparent 62%),
+    radial-gradient(700px 500px at 100% 30%, rgba(30,60,170,.14), transparent 60%),
+    radial-gradient(700px 500px at 0% 55%, rgba(24,44,140,.12), transparent 60%),
+    var(--bg);
+  background-attachment:fixed; }
 .wrap { display:grid; grid-template-columns:270px minmax(0,1fr) 360px; gap:12px; padding:12px; align-items:start; }
-.card { background:#fcfcfb; border:1px solid #e4e3df; border-radius:8px; padding:12px 14px; }
-.card h3 { margin:0 0 8px; font-size:13px; font-weight:600; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+  box-shadow:0 0 0 1px rgba(0,0,0,.4), 0 18px 40px -24px rgba(40,90,255,.35); backdrop-filter:blur(6px); }
+.card h3 { margin:0 0 10px; font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--accent-soft); }
 .card + .card { margin-top:12px; }
-.top { padding:12px 16px 0; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
-.top h1 { font-size:16px; margin:0; font-weight:600; }
-.status { color:#52514e; font-size:12.5px; }
-label.ctl { display:block; font-size:12px; color:#52514e; margin:12px 0 4px; }
-.note { font-size:12px; color:#52514e; line-height:1.45; }
-.warn { background:#fdf1e3; border:1px solid #f0c98f; border-radius:6px; padding:8px 10px; font-size:12.5px; margin-top:8px; }
-.tag { display:inline-block; background:#12407c; color:#fff; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; letter-spacing:.03em; }
+.map-card { padding:0; overflow:hidden;
+  background:
+    radial-gradient(ellipse 62% 50% at 50% 34%, rgba(70,130,255,.72), rgba(24,56,170,.40) 42%, rgba(6,9,19,0) 78%),
+    linear-gradient(#070b18, #04060c); }
+.map-card .below { padding:4px 14px 12px; }
+.top { padding:14px 18px 2px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.top h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
+.top h1 span { color:var(--accent-soft); font-weight:500; }
+.status { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
+label.ctl { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
+.note { font-size:12px; color:var(--muted); line-height:1.5; }
+.warn { background:rgba(217,137,38,.10); border:1px solid rgba(217,137,38,.45); color:#f1d3a6; border-radius:6px; padding:8px 10px; font-size:12.5px; margin-top:8px; }
+.tag { display:inline-block; background:rgba(61,123,255,.16); color:var(--accent-soft); border:1px solid var(--line-strong); border-radius:4px; padding:2px 7px; font-size:10.5px; font-weight:600; letter-spacing:.1em; }
 table.kv { border-collapse:collapse; width:100%; font-size:12.5px; }
-table.kv td { padding:3px 0; } table.kv td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
-button.btn { margin-top:10px; background:#0b0b0b; color:#fff; border:0; border-radius:6px; padding:7px 12px; font-size:12.5px; cursor:pointer; }
+table.kv td { padding:4px 0; border-bottom:1px solid rgba(125,165,255,.08); color:var(--muted); }
+table.kv td:last-child { text-align:right; font-variant-numeric:tabular-nums; color:var(--text); }
+button.btn { margin-top:10px; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 12px; font-size:12.5px; font-weight:600; cursor:pointer; box-shadow:0 0 18px -4px rgba(61,123,255,.8); }
+button.btn:hover { background:#5a8fff; }
+input[type=number] { background:#070b18; color:var(--text); border:1px solid var(--line-strong); border-radius:6px; }
+input[type=radio], input[type=checkbox] { accent-color:var(--accent); }
+.modebar { background:transparent !important; } .modebar-btn path { fill:rgba(143,180,255,.55) !important; }
 @media (max-width:1250px) { .wrap { grid-template-columns:250px minmax(0,1fr); } .right { grid-column:1 / -1; } }
 """
 
@@ -115,7 +151,7 @@ class DashboardState:
 # ---------------------------------------------------------------------- figures
 def _empty(msg: str, height: int = 620) -> go.Figure:
     fig = go.Figure()
-    fig.update_layout(height=height, paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT,
+    fig.update_layout(height=height, paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT, template=None,
                       xaxis=dict(visible=False), yaxis=dict(visible=False), margin=dict(l=10, r=10, t=10, b=10),
                       annotations=[dict(text=msg, showarrow=False, font=dict(size=14, color=MUTED))])
     return fig
@@ -156,19 +192,27 @@ def map_figure(st: DashboardState, view: dict[str, Any], sel_step: int | None, l
         zlo, zhi = float(z.min()), float(z.max())
         lift = 0.012 * (zhi - zlo)
         sup = mesh["supported"]
+
+        def wire(color: str) -> dict[str, Any]:
+            def ax(v: np.ndarray) -> dict[str, Any]:
+                return dict(show=True, start=float(v[0]), end=float(v[-1]), size=float(v[1] - v[0]),
+                            color=color, width=1, highlight=False)
+            return dict(x=ax(mesh["a"]), y=ax(mesh["b"]), z=dict(show=False, highlight=False))
         hover = "a %{x:.3g}, b %{y:.3g}<br>loss %{z:.4g}<extra>" 
         fig.add_trace(go.Surface(
             x=mesh["a"], y=mesh["b"], z=np.where(sup, z, np.nan), colorscale=LOSS_SCALE, cmin=zlo, cmax=zhi,
             name="Surface, evaluated", showlegend=True, hovertemplate=hover + "near an evaluated point</extra>",
-            colorbar=dict(title=dict(text="loss", side="right"), thickness=10, len=0.55, x=1.0, outlinewidth=0),
-            lighting=dict(ambient=0.75, diffuse=0.5, specular=0.05, roughness=0.9)))
+            contours=wire(WIRE_EVAL),
+            colorbar=dict(title=dict(text="loss", side="right"), thickness=8, len=0.5, x=0.97, outlinewidth=0,
+                          tickfont=dict(color=MUTED, size=10)),
+            lighting=dict(ambient=0.9, diffuse=0.35, specular=0.0, roughness=1.0)))
         interp = binary_dilation(~sup)
         if interp.any():
             fig.add_trace(go.Surface(
                 x=mesh["a"], y=mesh["b"], z=np.where(interp, z, np.nan), colorscale=GRAY_SCALE, showscale=False,
-opacity=0.45, name="Surface, interpolated", showlegend=True,
+opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlegend=True,
                 hovertemplate=hover + "interpolated, not evaluated</extra>",
-                lighting=dict(ambient=0.9, diffuse=0.2, specular=0.0)))
+                lighting=dict(ambient=1.0, diffuse=0.0, specular=0.0)))
         u = unit(info["coarse_h"])
         keys = [k for k, v in points.items() if v[0] is not None]
         pz = np.array([points[k][0] for k in keys])
@@ -176,7 +220,7 @@ opacity=0.45, name="Surface, interpolated", showlegend=True,
             pz = np.minimum(pz, zcap)
         fig.add_trace(go.Scatter3d(
             x=[k[0] * u for k in keys], y=[k[1] * u for k in keys], z=pz, mode="markers",
-            marker=dict(size=1.6, color=MUTED, opacity=0.7), name=f"Evaluated grid points ({len(keys)})",
+            marker=dict(size=1.5, color="#cfe0ff", opacity=0.75), name=f"Evaluated grid points ({len(keys)})",
             hovertemplate="a %{x:.3g}, b %{y:.3g}<br>loss %{z:.4g}<extra>evaluated</extra>"))
 
     def hover_text(name: str, p: dict[str, Any]) -> list[str]:
@@ -188,11 +232,11 @@ opacity=0.45, name="Surface, interpolated", showlegend=True,
     ta, tb, ts = np.array(trunk["a"]), np.array(trunk["b"]), np.array(trunk["steps"])
     upto = ts <= sel_step
     if (~upto).any():
-        fig.add_trace(go.Scatter3d(x=ta, y=tb, z=tz, mode="lines", line=dict(color="rgba(11,11,11,0.25)", width=3),
+        fig.add_trace(go.Scatter3d(x=ta, y=tb, z=tz, mode="lines", line=dict(color="rgba(255,255,255,0.28)", width=3),
                                    name="Trunk (after selected step)", hoverinfo="skip"))
     fig.add_trace(go.Scatter3d(
-        x=ta[upto], y=tb[upto], z=tz[upto], mode="lines+markers", line=dict(color=INK, width=5),
-        marker=dict(size=3, color=INK), name="Trunk (training)",
+        x=ta[upto], y=tb[upto], z=tz[upto], mode="lines+markers", line=dict(color=TRUNK_COLOR, width=6),
+        marker=dict(size=3, color=TRUNK_COLOR), name="Trunk (training)",
         text=[t for t, k in zip(hover_text(TRUNK, trunk), upto) if k], hovertemplate="%{text}<extra></extra>"))
     for name, p in proj.items():
         if name == TRUNK or not p["steps"] or p.get("from_step", 0) > sel_step:
@@ -204,12 +248,17 @@ opacity=0.45, name="Surface, interpolated", showlegend=True,
             hovertemplate="%{text}<extra></extra>"))
     k = int(np.searchsorted(ts, sel_step, side="right") - 1)
     fig.add_trace(go.Scatter3d(x=[ta[k]], y=[tb[k]], z=[tz[k]], mode="markers",
-                               marker=dict(size=7, color="#ffffff", line=dict(color=INK, width=3)),
+                               marker=dict(size=7, color=ACCENT, line=dict(color="#ffffff", width=3)),
                                name=f"Selected snapshot (step {int(ts[k])})", hoverinfo="skip"))
-    axis = dict(backgroundcolor=SURFACE_BG, gridcolor=GRID, zerolinecolor=GRID, showspikes=False)
+    axis = dict(showbackground=False, gridcolor="rgba(140,165,255,0.10)", zerolinecolor="rgba(140,165,255,0.18)",
+                showspikes=False, tickfont=dict(color=MUTED, size=10), title_font=dict(color=MUTED, size=11),
+                linecolor="rgba(140,165,255,0.25)")
     fig.update_layout(
-        height=640, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor=SURFACE_BG, font=FONT,
-        uirevision=info["mode"], legend=dict(x=0.01, y=0.99, bgcolor="rgba(252,252,251,0.85)", font=dict(size=11)),
+        height=640, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor=SURFACE_BG, font=FONT, template=None,
+        hoverlabel=dict(bgcolor=PANEL, bordercolor="rgba(125,165,255,0.5)", font=dict(color=INK, size=12)),
+        uirevision=info["mode"], legend=dict(x=0.012, y=0.985, bgcolor="rgba(6,10,22,0.55)",
+                                             bordercolor="rgba(125,165,255,0.18)", borderwidth=1,
+                                             font=dict(size=11, color=INK)),
         scene=dict(xaxis=dict(title="a (direction 1)", **axis), yaxis=dict(title="b (direction 2)", **axis),
                    zaxis=dict(title="loss", type="log" if zlog else "linear", **axis),
                    aspectmode="manual", aspectratio=dict(x=1.2, y=1.2, z=0.7),
@@ -226,7 +275,7 @@ def fidelity_figure(st: DashboardState, view: dict[str, Any], sel_step: int | No
         if not p["steps"]:
             continue
         x = np.array(p["steps"]) + (0 if name == TRUNK else p.get("from_step", 0))
-        c = INK if name == TRUNK else colors.get(name, BRANCH_COLORS[0])
+        c = TRUNK_COLOR if name == TRUNK else colors.get(name, BRANCH_COLORS[0])
         fig.add_trace(go.Scatter(x=x, y=p["captured"], mode="lines+markers", name=name,
                                  line=dict(color=c, width=2), marker=dict(size=5, color=c),
                                  customdata=np.column_stack([p["steps"], p["residual"]]),
@@ -236,10 +285,11 @@ def fidelity_figure(st: DashboardState, view: dict[str, Any], sel_step: int | No
         fig.add_vline(x=sel_step, line=dict(color=MUTED, width=1, dash="dot"))
     multi = len(fig.data) > 1
     fig.update_layout(height=270 if multi else 230, margin=dict(l=44, r=10, t=44 if multi else 8, b=36),
-                      paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT, showlegend=multi,
+                      paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT, showlegend=multi, template=None,
+                      hoverlabel=dict(bgcolor=PANEL, bordercolor="rgba(125,165,255,0.5)", font=dict(color=INK)),
                       legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(size=10)),
-                      xaxis=dict(title="step (branches offset by their start step)", gridcolor=GRID, zeroline=False),
-                      yaxis=dict(title="captured", range=[-0.03, 1.03], tickformat=".0%", gridcolor=GRID, zeroline=False))
+                      xaxis=dict(title="step (branches offset by their start step)", gridcolor=GRID, zeroline=False, linecolor=GRID),
+                      yaxis=dict(title="captured", range=[-0.03, 1.03], tickformat=".0%", gridcolor=GRID, zeroline=False, linecolor=GRID))
     return fig
 
 
@@ -308,7 +358,8 @@ def metrics_figure(st: DashboardState, selected: list[str]) -> go.Figure:
     fig.update_xaxes(title_text="branch step", row=len(selected), col=1)
     fig.update_annotations(font=dict(size=12, color=INK), x=0, xanchor="left")
     fig.update_layout(height=150 + 150 * len(selected), margin=dict(l=48, r=10, t=30, b=40), paper_bgcolor=SURFACE_BG,
-                      plot_bgcolor=SURFACE_BG, font=FONT, showlegend=True,
+                      plot_bgcolor=SURFACE_BG, font=FONT, showlegend=True, template=None,
+                      hoverlabel=dict(bgcolor=PANEL, bordercolor="rgba(125,165,255,0.5)", font=dict(color=INK)),
                       legend=dict(orientation="h", y=1.0, yanchor="bottom", x=1, xanchor="right", font=dict(size=10)))
     return fig
 
@@ -327,7 +378,8 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         return html.Div([
             dcc.Interval(id="tick", interval=interval_ms),
             dcc.Store(id="sig"), dcc.Store(id="ctl-sink"), dcc.Store(id="clicked"), dcc.Download(id="download"),
-            html.Div([html.H1(f"Run {Path(run_dir).name}"), html.Div(id="status", className="status")], className="top"),
+            html.Div([html.H1([html.Span("trajmap / "), Path(run_dir).name]), html.Div(id="status", className="status")],
+                     className="top"),
             html.Div([
                 html.Div([
                     html.Div([
@@ -364,12 +416,12 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                     html.Div([
                         dcc.Graph(id="map", figure=_empty("Loading…"), config={"displaylogo": False}),
                         html.Div([html.Label(id="step-label", className="ctl", style={"margin": "4px 0"}),
-                                  dcc.Slider(id="step", min=0, max=1, step=1, value=1, marks=None, updatemode="drag")]),
+                                  dcc.Slider(id="step", min=0, max=1, step=1, value=1, marks=None, updatemode="drag"),
                         html.Div("Paths are drawn on the interpolated surface at each snapshot's in-plane position. "
                                  "Hover a snapshot for its recorded loss and how much of it the plane captures. "
                                  "Click anywhere on the surface to evaluate the weights at that point.",
-                                 className="note", style={"marginTop": "6px"}),
-                    ], className="card"),
+                                 className="note", style={"marginTop": "6px"})], className="below"),
+                    ], className="card map-card"),
                     html.Div([
                         html.H3("Branch metrics (full parameter space)"),
                         dcc.Dropdown(id="series", multi=True, value=default_series, options=opts,
