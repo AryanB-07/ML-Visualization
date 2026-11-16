@@ -128,6 +128,42 @@ their buffers and reconstruct exactly.
 eval batches per grid point, and the refinement budget (grid points per basis
 version). Changing eval batches re-evaluates the surface; the other two keep the cache.
 
+## Improve the map
+
+One training run shows one route. "Improve map" adds more: it picks start
+points far from every recorded path, trains from each down to a minimum, and
+records the descents as extra trajectories ("explorations"). The worker then
+refines the surface around them, so more of the map is backed by real
+evaluations.
+
+```bash
+tracer improve runs/mnist                 # one exploration
+tracer improve runs/mnist --auto          # until no far-away start point is left (or --max-runs)
+tracer improve runs/mnist --minutes 5     # for a fixed time; the last descent is cut off at the deadline
+```
+
+The dashboard has the same three modes behind the "Improve map" button, with
+Start and Stop.
+
+- **Where it starts.** By default, a random pick among the points of the
+  current plane that are farthest from all projected paths, inside the
+  trunk's bounding box grown by 35%. `--start init` uses a fresh random
+  initialization instead (the one farthest from all stored snapshots).
+- **When a descent stops.** At the first of: recent loss within 5% of the
+  trunk's final loss level, a plateau (two windows without 2% improvement),
+  the trunk's step count, 120 s per exploration (`-c max_seconds_each=...`),
+  the time budget, or Stop.
+- **What it trains with.** Plain SGD on `dataset_factory`, with `lr`,
+  `momentum`, `weight_decay` and `batch_size` read from the run's `config`
+  (override with `-c`), and gradient clipping at norm 10. It does not replay
+  your training loop: schedules, augmentation and other optimizers are not
+  reproduced, so explorations are comparable to the trunk only loosely.
+- **Cost.** Each exploration is a training run of up to the trunk's length,
+  stores its own snapshots, and raises the grid budget by 150 points.
+- **Caveat.** A descent leaves the plane quickly, so its drawn path is often
+  short while its real movement is large; check its captured fraction. In the
+  joint basis, explorations take part in the PCA fit and change the plane.
+
 ## The 2D projection can mislead
 
 The map shows a 2D slice of a space with as many dimensions as the model has
@@ -213,6 +249,7 @@ Built in:
 tracer dashboard RUN [--port 8050] [--interval 2]
 tracer unlearn   RUN --method NAME --from-step N [--branch NAME] [--every K] [-c key=value ...] [--plugin MODULE]
 tracer metrics   RUN --branch NAME [--metric NAME ...] [--plugin MODULE]
+tracer improve   RUN [--auto | --minutes M] [--max-runs N] [--start plane|init] [-c key=value ...]
 tracer info      RUN
 ```
 

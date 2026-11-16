@@ -371,7 +371,7 @@ def fidelity_chip(view: dict[str, Any]) -> tuple[str, str]:
     worst = min(med, key=med.get)
     text = f"Plane captures {med[TRUNK]:.0%} of the trunk (median)"
     if worst != TRUNK:
-        text += f" · lowest branch {med[worst]:.0%}"
+        text += f" · lowest other path {med[worst]:.0%}"
     return text, "chip low" if med[worst] < 0.5 else "chip"
 
 
@@ -576,8 +576,11 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         ws = worker_status(st.run.dir)
         ctl = st.run.control()
         n_pts = len(view.get("points", {}))
+        kinds = [t.kind for t in st.run.branches()]
+        n_exp = kinds.count("explore")
         parts = [f"Training {'finished' if st.run.trunk.finished else 'in progress'}",
-                 f"{len(steps)} snapshots", f"{len(st.run.branch_names())} branches",
+                 f"{len(steps)} snapshots", f"{len(kinds) - n_exp} branches",
+                 *([f"{n_exp} explorations"] if n_exp else []),
                  f"{n_pts} / {ctl['budget']} grid points" if info else "no basis yet",
                  f"worker {ws.get('state', 'not running') if ws['alive'] else 'not running'}"]
         if ws.get("error"):
