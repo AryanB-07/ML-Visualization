@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trajmap"
+version = "0.1.0"
+description = "Record training and unlearning trajectories as branches of one run and explore them on a live, shared loss-landscape map."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "torch>=2.1",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "safetensors>=0.4",
+    "dash>=2.16",
+    "plotly>=5.18",
+]
+
+[project.optional-dependencies]
+examples = ["torchvision>=0.16"]
+dev = ["pytest>=7", "torchvision>=0.16"]
+
+[project.scripts]
+tracer = "trajmap.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trajmap"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
