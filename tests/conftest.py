@@ -52,3 +52,9 @@ def write_trajectory(writer, points: np.ndarray) -> None:
     for k, p in enumerate(points):
         writer.save_snapshot(k * 10, torch.tensor(p, dtype=torch.float32))
     writer.set_info(finished=True)
+
+
+def tiny_dataset():
+    """Importable dataset factory for exploration tests."""
+    from torch.utils.data import TensorDataset
+    return TensorDataset(*make_data())

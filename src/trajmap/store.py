@@ -121,6 +121,11 @@ class Trajectory:
         return int(self.info().get("from_step", 0))
 
     @property
+    def kind(self) -> str:
+        """``"trunk"``, ``"branch"`` (starts at a trunk snapshot) or ``"explore"`` (starts elsewhere)."""
+        return TRUNK if self.is_trunk else self.info().get("kind", "branch")
+
+    @property
     def finished(self) -> bool:
         return bool(self.info().get("finished", False))
 
@@ -297,6 +302,20 @@ class Run:
                    every_n_steps=every_n_steps, finished=False, created=time.time())
         loss = next((r.get("loss") for r in self.trunk.records() if r["step"] == from_step), None)
         w.save_snapshot(0, snap.params, snap.buffers, snap.int_buffers, loss=loss)
+        return w
+
+    def create_exploration(self, name: str, params: torch.Tensor, buffers: torch.Tensor | None = None,
+                           int_buffers: torch.Tensor | None = None, **info: Any) -> TrajectoryWriter:
+        """Start a trajectory that does not begin on the trunk (see explore.py).
+
+        It is stored next to the branches in the same format, with ``kind="explore"``,
+        so projection, landscape and metric code picks it up like any branch.
+        """
+        if name == TRUNK or not name or "/" in name or name in self.branch_names():
+            raise ValueError(f"invalid or duplicate trajectory name {name!r}")
+        w = TrajectoryWriter(self.dir, name, dtype=self.meta.get("snapshot_dtype", "float32"))
+        w.set_info(name=name, kind="explore", parent=None, from_step=0, finished=False, created=time.time(), **info)
+        w.save_snapshot(0, params, buffers, int_buffers)
         return w
 
     # -- reconstruction

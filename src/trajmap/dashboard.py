@@ -29,7 +29,8 @@ INK, MUTED, GRID, SURFACE_BG = "#e6ecff", "#8793b3", "rgba(140,165,255,0.13)", "
 PANEL = "#0a1022"                       # opaque stand-in for the card colour (hover labels, legends)
 ACCENT, ACCENT_SOFT = "#3d7bff", "#8fb4ff"
 TRUNK_COLOR = "#ffffff"
-BRANCH_COLORS = ["#d95926", "#9085e9", "#c98500", "#d55181"]  # validated on the dark surface; no greens
+BRANCH_COLORS = ["#d95926", "#9085e9", "#d55181"]  # validated on the dark surface; no greens
+EXPLORE_COLOR = "#c98500"                           # every exploration shares one colour
 LOSS_SCALE = [[0.0, "#040816"], [0.55, "#0a1c52"], [1.0, "#173a96"]]   # one hue, dark -> bright with loss
 GRAY_SCALE = [[0.0, "#080c18"], [1.0, "#121a30"]]
 WIRE_EVAL, WIRE_INTERP = "rgba(96,150,255,0.95)", "rgba(110,130,185,0.26)"
@@ -130,7 +131,10 @@ class DashboardState:
 
     def branch_colors(self) -> dict[str, str]:
         bs = sorted(self.run.branches(), key=lambda t: t.info().get("created", 0))
-        return {t.name: BRANCH_COLORS[i % len(BRANCH_COLORS)] for i, t in enumerate(bs)}
+        out = {t.name: EXPLORE_COLOR for t in bs if t.kind == "explore"}
+        out.update({t.name: BRANCH_COLORS[i % len(BRANCH_COLORS)]
+                    for i, t in enumerate(t for t in bs if t.kind != "explore")})
+        return out
 
     def view(self, mode: str) -> dict[str, Any]:
         info = self.bm.latest_info(mode)
@@ -263,14 +267,21 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
         x=ta[upto], y=tb[upto], z=tz[upto], mode="lines+markers", line=dict(color=TRUNK_COLOR, width=6),
         marker=dict(size=3, color=TRUNK_COLOR), name="Trunk (training)",
         text=[t for t, k in zip(hover_text(TRUNK, trunk), upto) if k], hovertemplate="%{text}<extra></extra>"))
+    explores = [n for n, c in colors.items() if c == EXPLORE_COLOR and n in proj and proj[n]["steps"]]
     for name, p in proj.items():
         if name == TRUNK or not p["steps"] or p.get("from_step", 0) > sel_step:
             continue
         c = colors.get(name, BRANCH_COLORS[0])
+        is_exp = name in explores
+        sizes = [3] * len(p["steps"])
+        if is_exp:
+            sizes[0] = 7  # where the exploration started
         fig.add_trace(go.Scatter3d(
-            x=p["a"], y=p["b"], z=path_zs[name] + lift, mode="lines+markers", line=dict(color=c, width=5),
-            marker=dict(size=3, color=c), name=f"Branch {name}", text=hover_text(name, p),
-            hovertemplate="%{text}<extra></extra>"))
+            x=p["a"], y=p["b"], z=path_zs[name] + lift, mode="lines+markers", line=dict(color=c, width=4 if is_exp else 5),
+            marker=dict(size=sizes, color=c, symbol="diamond" if is_exp else "circle"),
+            name=f"Explorations ({len(explores)})" if is_exp else f"Branch {name}",
+            legendgroup="explore" if is_exp else name, showlegend=(not is_exp) or name == explores[0],
+            text=hover_text(name, p), hovertemplate="%{text}<extra></extra>"))
     k = int(np.searchsorted(ts, sel_step, side="right") - 1)
     fig.add_trace(go.Scatter3d(x=[ta[k]], y=[tb[k]], z=[tz[k]], mode="markers",
                                marker=dict(size=7, color=ACCENT, line=dict(color="#ffffff", width=3)),
@@ -486,9 +497,38 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                           html.Button("Fidelity", id="nav-fidelity", className="nav", n_clicks=0),
                           html.Button("Branch metrics", id="nav-metrics", className="nav", n_clicks=0)], className="navs"),
                 html.Div(id="status", className="status"),
+                html.Button("Improve map", id="improve-btn", className="ghost", n_clicks=0),
                 html.Button("Settings", id="settings-btn", className="ghost", n_clicks=0),
             ], className="top"),
             settings,
+            html.Div([
+                html.Div([html.H2("Improve map"), html.Button("Close", id="improve-close", className="ghost", n_clicks=0)],
+                         className="drawer-head"),
+                html.Div("Trains from new start points far from every recorded path, down to a minimum, and adds "
+                         "each descent to the map. This costs training compute; choose how much.", className="note"),
+                html.H3("How much"),
+                dcc.RadioItems(id="improve-mode", value="one", options=[
+                    {"label": "One exploration", "value": "one"},
+                    {"label": "Auto: until the map is covered", "value": "auto"},
+                    {"label": "For a fixed time", "value": "time"}],
+                    labelStyle={"display": "block", "margin": "3px 0"}),
+                html.Div([html.Div([html.Label("Minutes (fixed time)", className="ctl"),
+                                    dcc.Input(id="improve-minutes", type="number", value=2, min=0.5, max=600, step=0.5,
+                                              style={"width": "100%", "boxSizing": "border-box", "padding": "6px"})]),
+                          html.Div([html.Label("Max explorations (auto)", className="ctl"),
+                                    dcc.Input(id="improve-max", type="number", value=6, min=1, max=50, step=1,
+                                              style={"width": "100%", "boxSizing": "border-box", "padding": "6px"})])],
+                         style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"}),
+                html.H3("Start from"),
+                dcc.RadioItems(id="improve-start", value="plane", options=[
+                    {"label": "A point on the map, far from all paths", "value": "plane"},
+                    {"label": "A fresh random initialization", "value": "init"}],
+                    labelStyle={"display": "block", "margin": "3px 0"}),
+                html.Div([html.Button("Start", id="improve-go", className="btn", n_clicks=0),
+                          html.Button("Stop", id="improve-stop", className="ghost", n_clicks=0)],
+                         style={"display": "flex", "gap": "8px", "alignItems": "end", "marginTop": "4px"}),
+                html.Div(id="improve-status", className="note", style={"marginTop": "10px"}),
+            ], id="improve", className="drawer"),
             html.Div([page_map, page_fidelity, page_metrics], className="pages"),
         ])
 
@@ -586,6 +626,31 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                   prevent_initial_call=True)
     def toggle_popup(children, _close):
         return "popup" if ctx.triggered_id == "popup-close" or not children else "popup open"
+
+    @app.callback(Output("improve", "className"), Input("improve-btn", "n_clicks"), Input("improve-close", "n_clicks"),
+                  State("improve", "className"), prevent_initial_call=True)
+    def toggle_improve(_open, _close, cls):
+        return "drawer" if ctx.triggered_id == "improve-close" or "open" in (cls or "") else "drawer open"
+
+    @app.callback(Output("improve-status", "children"), Input("tick", "n_intervals"), Input("improve-go", "n_clicks"),
+                  Input("improve-stop", "n_clicks"), State("improve-mode", "value"), State("improve-minutes", "value"),
+                  State("improve-max", "value"), State("improve-start", "value"))
+    def improve(_tick, _go, _stop, mode, minutes, max_runs, start):
+        from .explore import improve_status, request_stop, start_improve
+        if ctx.triggered_id == "improve-go":
+            start_improve(st.run.dir, mode, float(minutes or 2) if mode == "time" else None, int(max_runs or 6),
+                          start, device)
+        elif ctx.triggered_id == "improve-stop" and improve_status(st.run.dir)["alive"]:
+            request_stop(st.run.dir)
+        s = improve_status(st.run.dir)
+        n_exp = sum(t.kind == "explore" for t in st.run.branches())
+        if s["alive"]:
+            cur = s.get("current")
+            left = f" · {max(0, s['deadline'] - time.time()) / 60:.1f} min left" if s.get("deadline") else ""
+            doing = f"{cur['name']} at step {cur['step']}, loss {cur['loss']:.3g}" if cur else "choosing a start point"
+            return f"Running ({s.get('mode')}): {doing} · {s.get('done', 0)} finished this session{left}"
+        tail = f" Last session: {s['result']}." if s.get("result") else ""
+        return f"Idle. {n_exp} exploration{'s' if n_exp != 1 else ''} on the map.{tail}"
 
     @app.callback(Output("drawer", "className"), Input("settings-btn", "n_clicks"), Input("drawer-close", "n_clicks"),
                   State("drawer", "className"), prevent_initial_call=True)

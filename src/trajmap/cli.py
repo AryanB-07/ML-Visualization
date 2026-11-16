@@ -1,4 +1,4 @@
-"""Command line: ``tracer dashboard | unlearn | metrics | info``."""
+"""Command line: ``tracer dashboard | unlearn | metrics | improve | info``."""
 from __future__ import annotations
 
 import argparse
@@ -51,6 +51,17 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("--metric", action="append", help="metric name (default: all registered)")
     m.add_argument("--plugin", "-p", action="append", metavar="MODULE")
 
+    e = sub.add_parser("improve", help="improve the map: descend from new start points far from recorded paths")
+    e.add_argument("run_dir")
+    g = e.add_mutually_exclusive_group()
+    g.add_argument("--auto", action="store_true", help="keep going until the map is covered (or --max-runs)")
+    g.add_argument("--minutes", type=float, help="keep going for this many minutes")
+    e.add_argument("--max-runs", type=int, default=8, help="cap for --auto")
+    e.add_argument("--start", choices=["plane", "init"], default="plane",
+                   help="start on the 2D plane far from existing paths (default) or from a fresh random init")
+    e.add_argument("--config", "-c", action="append", metavar="KEY=VALUE", help="e.g. -c lr=0.05 -c max_seconds_each=60")
+    e.add_argument("--device", default="cpu")
+
     i = sub.add_parser("info", help="summarize a run directory")
     i.add_argument("run_dir")
 
@@ -88,13 +99,22 @@ def main(argv: list[str] | None = None) -> None:
             for k, st in enumerate(r["branch_steps"]):
                 print(f"  {st:>4}  " + "  ".join(f"{v[k]:>20.6g}" for v in r["series"].values()))
 
+    elif a.cmd == "improve":
+        from .explore import improve_map, improve_status
+        mode = "auto" if a.auto else ("time" if a.minutes else "one")
+        for t in improve_map(Run(a.run_dir), mode, a.minutes, a.max_runs, a.start, _parse_config(a.config), a.device):
+            inf = t.info()
+            print(f"{t.name}: {inf.get('steps')} steps, final loss {inf.get('final_loss'):.4g}, stopped: {inf.get('stopped')}")
+        print("result:", improve_status(a.run_dir).get("result"))
+
     elif a.cmd == "info":
         run = Run(a.run_dir)
         meta = run.meta
         print(f"run {run.dir}: {meta['num_params']:,} parameters, model {meta['model_class']}, seed {meta['seed']}")
         for t in run.trajectories():
             st = t.steps()
-            extra = "" if t.is_trunk else f", from trunk step {t.from_step}, method {t.info().get('method')}"
+            extra = "" if t.is_trunk else (f", exploration, stopped: {t.info().get('stopped')}" if t.kind == "explore"
+                                           else f", from trunk step {t.from_step}, method {t.info().get('method')}")
             print(f"  {t.name}: {len(st)} snapshots, steps {st[0]}..{st[-1]}, {'finished' if t.finished else 'running'}{extra}")
 
 
