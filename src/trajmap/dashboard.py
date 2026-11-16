@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import plotly.graph_objects as go
 import torch
-from dash import Dash, Input, Output, State, dcc, html, no_update
+from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from plotly.subplots import make_subplots
 from scipy.ndimage import binary_dilation
 
@@ -58,17 +58,42 @@ body { margin:0; min-height:100vh; color:var(--text);
     radial-gradient(700px 500px at 0% 55%, rgba(24,44,140,.12), transparent 60%),
     var(--bg);
   background-attachment:fixed; }
-.wrap { display:grid; grid-template-columns:270px minmax(0,1fr) 360px; gap:12px; padding:12px; align-items:start; }
+.pages { padding:10px 14px 14px; }
+.two-col { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr); gap:12px; align-items:start; }
+.two-col .card + .card { margin-top:0; }
+.navs { display:flex; gap:2px; background:rgba(10,16,34,.7); border:1px solid var(--line); border-radius:8px; padding:3px; }
+button.nav { background:transparent; border:0; color:var(--muted); font:inherit; font-size:12.5px; padding:5px 12px; border-radius:6px; cursor:pointer; }
+button.nav:hover { color:var(--text); }
+button.nav.on { background:rgba(61,123,255,.22); color:#fff; }
+button.ghost { background:transparent; border:1px solid var(--line-strong); color:var(--accent-soft); font:inherit; font-size:12px; padding:5px 11px; border-radius:6px; cursor:pointer; }
+button.ghost:hover { background:rgba(61,123,255,.14); color:#fff; }
+.drawer { position:fixed; top:0; right:0; bottom:0; width:310px; z-index:30; padding:16px 18px; overflow-y:auto;
+  background:rgba(7,11,24,.96); border-left:1px solid var(--line-strong); box-shadow:-30px 0 60px -30px rgba(40,90,255,.45);
+  transform:translateX(105%); transition:transform .18s ease; }
+.drawer.open { transform:none; }
+.drawer h2 { margin:0; font-size:13px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; }
+.drawer h3 { margin:20px 0 8px; font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--accent-soft); }
+.drawer .note { margin-top:8px; }
+.drawer-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.map-graph { height:calc(100vh - 150px); min-height:440px; }
+.chip { position:absolute; top:12px; right:12px; z-index:5; background:rgba(6,10,22,.6); color:var(--text); font:inherit; font-size:12px;
+  border:1px solid var(--line-strong); border-radius:999px; padding:5px 12px; cursor:pointer; }
+.chip:hover { border-color:var(--accent-soft); }
+.chip.low { border-color:rgba(217,137,38,.7); color:#f1d3a6; }
+.popup { position:absolute; right:12px; bottom:64px; z-index:6; width:300px; display:none; padding:12px 14px;
+  background:rgba(7,11,24,.94); border:1px solid var(--line-strong); border-radius:10px; box-shadow:0 20px 50px -20px rgba(40,90,255,.6); }
+.popup.open { display:block; }
 .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px;
   box-shadow:0 0 0 1px rgba(0,0,0,.4), 0 18px 40px -24px rgba(40,90,255,.35); backdrop-filter:blur(6px); }
 .card h3 { margin:0 0 10px; font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--accent-soft); }
 .card + .card { margin-top:12px; }
-.map-card { padding:0; overflow:hidden;
+.map-card { padding:0; overflow:hidden; position:relative;
   background:
     radial-gradient(ellipse 62% 50% at 50% 34%, rgba(70,130,255,.72), rgba(24,56,170,.40) 42%, rgba(6,9,19,0) 78%),
     linear-gradient(#070b18, #04060c); }
 .map-card .below { padding:4px 14px 12px; }
-.top { padding:14px 18px 2px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.top { padding:12px 16px 0; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.top .status { flex:1; text-align:right; }
 .top h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
 .top h1 span { color:var(--accent-soft); font-weight:500; }
 .status { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
@@ -84,7 +109,7 @@ button.btn:hover { background:#5a8fff; }
 input[type=number] { background:#070b18; color:var(--text); border:1px solid var(--line-strong); border-radius:6px; }
 input[type=radio], input[type=checkbox] { accent-color:var(--accent); }
 .modebar { background:transparent !important; } .modebar-btn path { fill:rgba(143,180,255,.55) !important; }
-@media (max-width:1250px) { .wrap { grid-template-columns:250px minmax(0,1fr); } .right { grid-column:1 / -1; } }
+@media (max-width:900px) { .two-col { grid-template-columns:1fr; } .top .status { flex-basis:100%; text-align:left; } }
 """
 
 
@@ -254,15 +279,15 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
                 showspikes=False, tickfont=dict(color=MUTED, size=10), title_font=dict(color=MUTED, size=11),
                 linecolor="rgba(140,165,255,0.25)")
     fig.update_layout(
-        height=640, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor=SURFACE_BG, font=FONT, template=None,
+        autosize=True, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor=SURFACE_BG, font=FONT, template=None,
         hoverlabel=dict(bgcolor=PANEL, bordercolor="rgba(125,165,255,0.5)", font=dict(color=INK, size=12)),
-        uirevision=info["mode"], legend=dict(x=0.012, y=0.985, bgcolor="rgba(6,10,22,0.55)",
+        uirevision=info["mode"], legend=dict(x=0.012, y=0.985, bgcolor="rgba(6,10,22,0.45)",
                                              bordercolor="rgba(125,165,255,0.18)", borderwidth=1,
                                              font=dict(size=11, color=INK)),
         scene=dict(xaxis=dict(title="a (direction 1)", **axis), yaxis=dict(title="b (direction 2)", **axis),
                    zaxis=dict(title="loss", type="log" if zlog else "linear", **axis),
                    aspectmode="manual", aspectratio=dict(x=1.2, y=1.2, z=0.7),
-                   camera=dict(eye=dict(x=1.1, y=-1.25, z=1.55))))
+                   camera=dict(eye=dict(x=0.95, y=-1.1, z=1.2), center=dict(x=0, y=0, z=-0.12))))
     return fig
 
 
@@ -284,7 +309,7 @@ def fidelity_figure(st: DashboardState, view: dict[str, Any], sel_step: int | No
     if sel_step is not None:
         fig.add_vline(x=sel_step, line=dict(color=MUTED, width=1, dash="dot"))
     multi = len(fig.data) > 1
-    fig.update_layout(height=270 if multi else 230, margin=dict(l=44, r=10, t=44 if multi else 8, b=36),
+    fig.update_layout(height=400, margin=dict(l=48, r=10, t=44 if multi else 8, b=40),
                       paper_bgcolor=SURFACE_BG, plot_bgcolor=SURFACE_BG, font=FONT, showlegend=multi, template=None,
                       hoverlabel=dict(bgcolor=PANEL, bordercolor="rgba(125,165,255,0.5)", font=dict(color=INK)),
                       legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(size=10)),
@@ -324,6 +349,19 @@ def fidelity_panel(view: dict[str, Any], sel_step: int | None) -> list[Any]:
                         "2D plane. Residual norm is the part the map cannot show.", className="note",
                         style={"marginTop": "8px"}))
     return out
+
+
+def fidelity_chip(view: dict[str, Any]) -> tuple[str, str]:
+    """One-line fidelity summary shown on the map; turns amber when the picture is misleading."""
+    proj = view.get("proj") or {}
+    if view["info"] is None or TRUNK not in proj or not proj[TRUNK]["steps"]:
+        return "Fidelity: no basis yet", "chip"
+    med = {n: float(np.median(p["captured"])) for n, p in proj.items() if p["steps"]}
+    worst = min(med, key=med.get)
+    text = f"Plane captures {med[TRUNK]:.0%} of the trunk (median)"
+    if worst != TRUNK:
+        text += f" · lowest branch {med[worst]:.0%}"
+    return text, "chip low" if med[worst] < 0.5 else "chip"
 
 
 def metric_options(st: DashboardState) -> list[str]:
@@ -375,71 +413,83 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         ctl = st.run.control()
         opts = metric_options(st)
         default_series = [o for o in opts if o in ("nearest_trunk / nearest_trunk_step", "off_path / off_path_distance")]
+        settings = html.Div([
+            html.Div([html.H2("Settings"), html.Button("Close", id="drawer-close", className="ghost", n_clicks=0)],
+                     className="drawer-head"),
+            html.H3("Projection basis"),
+            dcc.RadioItems(id="mode", value=ctl["mode"], options=[{"label": MODE_LABELS[m], "value": m} for m in MODES],
+                           labelStyle={"display": "block", "margin": "3px 0"}),
+            html.Div("Each basis is its own coordinate system with its own cached surface.", className="note"),
+            html.H3("Accuracy vs. latency"),
+            html.Label("Finest grid (points per axis)", className="ctl"),
+            dcc.Dropdown(id="resolution", value=int(ctl["resolution"]), clearable=False,
+                         options=[{"label": f"{r} × {r}", "value": r} for r in RESOLUTIONS]),
+            html.Label("Eval batches per grid point", className="ctl"),
+            dcc.Dropdown(id="eval-batches", value=int(ctl["eval_batches"]), clearable=False,
+                         options=[{"label": str(n), "value": n} for n in (1, 2, 4, 8)] + [{"label": "whole eval subset", "value": 0}]),
+            html.Label("Refinement budget (grid points per basis)", className="ctl"),
+            dcc.Input(id="budget", type="number", value=int(ctl["budget"]), min=50, max=20000, step=50,
+                      debounce=True, style={"width": "100%", "boxSizing": "border-box", "padding": "6px"}),
+            html.Div("Changing eval batches re-evaluates the surface; resolution and budget keep what is cached.",
+                     className="note"),
+            html.H3("Display"),
+            dcc.Checklist(id="display", value=["clip", "follow"], options=[
+                {"label": " Log loss axis", "value": "zlog"},
+                {"label": " Clip tall walls (2× max path loss)", "value": "clip"},
+                {"label": " Follow the latest snapshot", "value": "follow"}],
+                labelStyle={"display": "block", "margin": "3px 0"}),
+        ], id="drawer", className="drawer")
+
+        page_map = html.Div([
+            html.Div([
+                dcc.Graph(id="map", figure=_empty("Loading…", None), responsive=True,
+                          style={"height": "calc(100vh - 150px)", "minHeight": "440px"},
+                          config={"displaylogo": False, "displayModeBar": False}),
+                html.Button(id="fidelity-chip", className="chip", n_clicks=0, title="Open projection fidelity"),
+                html.Div([
+                    html.Div([html.Span("In-plane approximation", className="tag"),
+                              html.Button("Close", id="popup-close", className="ghost", n_clicks=0)], className="drawer-head"),
+                    html.Div(id="click-panel"),
+                    html.Button("Export state_dict (.pt)", id="export", className="btn", n_clicks=0, style={"display": "none"}),
+                ], id="popup", className="popup"),
+                html.Div([html.Div([html.Label(id="step-label", className="ctl", style={"margin": "0"}),
+                                    html.Span("Click the surface to evaluate a point · hover a snapshot for details",
+                                              className="note")], className="drawer-head", style={"marginBottom": "2px"}),
+                          dcc.Slider(id="step", min=0, max=1, step=1, value=1, marks=None, updatemode="drag")],
+                         className="below"),
+            ], className="card map-card"),
+        ], id="page-map")
+
+        page_fidelity = html.Div([
+            html.Div([
+                html.Div([html.H3("Captured by the plane, per snapshot"),
+                          dcc.Graph(id="fidelity", figure=_empty("…", 380), responsive=True, config={"displayModeBar": False})],
+                         className="card"),
+                html.Div([html.H3("Numbers"), html.Div(id="fidelity-text")], className="card"),
+            ], className="two-col"),
+        ], id="page-fidelity", style={"display": "none"})
+
+        page_metrics = html.Div([
+            html.Div([
+                html.H3("Branch metrics (full parameter space)"),
+                dcc.Dropdown(id="series", multi=True, value=default_series, options=opts, placeholder="Metric series to plot"),
+                dcc.Graph(id="metrics", figure=_empty("…", 260), responsive=True, config={"displayModeBar": False}),
+            ], className="card"),
+        ], id="page-metrics", style={"display": "none"})
+
         return html.Div([
             dcc.Interval(id="tick", interval=interval_ms),
             dcc.Store(id="sig"), dcc.Store(id="ctl-sink"), dcc.Store(id="clicked"), dcc.Download(id="download"),
-            html.Div([html.H1([html.Span("trajmap / "), Path(run_dir).name]), html.Div(id="status", className="status")],
-                     className="top"),
             html.Div([
-                html.Div([
-                    html.Div([
-                        html.H3("Projection basis"),
-                        dcc.RadioItems(id="mode", value=ctl["mode"], options=[{"label": MODE_LABELS[m], "value": m} for m in MODES],
-                                       labelStyle={"display": "block", "margin": "3px 0"}),
-                        html.Div("Trunk-only and joint are separate coordinate systems, each with its own cached surface.",
-                                 className="note", style={"marginTop": "6px"}),
-                    ], className="card"),
-                    html.Div([
-                        html.H3("Accuracy vs. latency"),
-                        html.Label("Finest grid (points per axis)", className="ctl"),
-                        dcc.Dropdown(id="resolution", value=int(ctl["resolution"]), clearable=False,
-                                     options=[{"label": f"{r} × {r}", "value": r} for r in RESOLUTIONS]),
-                        html.Label("Eval batches per grid point", className="ctl"),
-                        dcc.Dropdown(id="eval-batches", value=int(ctl["eval_batches"]), clearable=False,
-                                     options=[{"label": str(n), "value": n} for n in (1, 2, 4, 8)] + [{"label": "whole eval subset", "value": 0}]),
-                        html.Label("Refinement budget (grid points per basis)", className="ctl"),
-                        dcc.Input(id="budget", type="number", value=int(ctl["budget"]), min=50, max=20000, step=50,
-                                  debounce=True, style={"width": "100%", "boxSizing": "border-box", "padding": "6px"}),
-                        html.Div("Changing eval batches re-evaluates the surface; resolution and budget keep what is cached.",
-                                 className="note", style={"marginTop": "8px"}),
-                    ], className="card"),
-                    html.Div([
-                        html.H3("Display"),
-                        dcc.Checklist(id="display", value=["clip", "follow"], options=[
-                            {"label": " Log loss axis", "value": "zlog"},
-                            {"label": " Clip tall walls (2× max path loss)", "value": "clip"},
-                            {"label": " Follow the latest snapshot while the slider is at the end", "value": "follow"}],
-                            labelStyle={"display": "block", "margin": "3px 0"}),
-                    ], className="card"),
-                ]),
-                html.Div([
-                    html.Div([
-                        dcc.Graph(id="map", figure=_empty("Loading…"), config={"displaylogo": False}),
-                        html.Div([html.Label(id="step-label", className="ctl", style={"margin": "4px 0"}),
-                                  dcc.Slider(id="step", min=0, max=1, step=1, value=1, marks=None, updatemode="drag"),
-                        html.Div("Paths are drawn on the interpolated surface at each snapshot's in-plane position. "
-                                 "Hover a snapshot for its recorded loss and how much of it the plane captures. "
-                                 "Click anywhere on the surface to evaluate the weights at that point.",
-                                 className="note", style={"marginTop": "6px"})], className="below"),
-                    ], className="card map-card"),
-                    html.Div([
-                        html.H3("Branch metrics (full parameter space)"),
-                        dcc.Dropdown(id="series", multi=True, value=default_series, options=opts,
-                                     placeholder="Metric series to plot"),
-                        dcc.Graph(id="metrics", figure=_empty("…", 260), config={"displayModeBar": False}),
-                    ], className="card"),
-                ]),
-                html.Div([
-                    html.Div([html.H3("Projection fidelity"),
-                              dcc.Graph(id="fidelity", figure=_empty("…", 230), config={"displayModeBar": False}),
-                              html.Div(id="fidelity-text")], className="card"),
-                    html.Div([html.H3("Clicked point"),
-                              html.Div(id="click-panel", children=html.Div("Click a point on the surface.", className="note")),
-                              html.Button("Export state_dict (.pt)", id="export", className="btn", n_clicks=0,
-                                          style={"display": "none"})],
-                             className="card"),
-                ], className="right"),
-            ], className="wrap"),
+                html.H1([html.Span("trajmap / "), Path(run_dir).name]),
+                html.Div([html.Button("Map", id="nav-map", className="nav on", n_clicks=0),
+                          html.Button("Fidelity", id="nav-fidelity", className="nav", n_clicks=0),
+                          html.Button("Branch metrics", id="nav-metrics", className="nav", n_clicks=0)], className="navs"),
+                html.Div(id="status", className="status"),
+                html.Button("Settings", id="settings-btn", className="ghost", n_clicks=0),
+            ], className="top"),
+            settings,
+            html.Div([page_map, page_fidelity, page_metrics], className="pages"),
         ])
 
     app.layout = layout
@@ -473,7 +523,7 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
 
     @app.callback(Output("map", "figure"), Output("fidelity", "figure"), Output("fidelity-text", "children"),
                   Output("metrics", "figure"), Output("status", "children"), Output("step-label", "children"),
-                  Output("sig", "data"),
+                  Output("fidelity-chip", "children"), Output("fidelity-chip", "className"), Output("sig", "data"),
                   Input("tick", "n_intervals"), Input("step", "value"), Input("mode", "value"),
                   Input("resolution", "value"), Input("display", "value"), Input("series", "value"),
                   Input("ctl-sink", "data"), State("sig", "data"))
@@ -487,9 +537,8 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         ctl = st.run.control()
         n_pts = len(view.get("points", {}))
         parts = [f"Training {'finished' if st.run.trunk.finished else 'in progress'}",
-                 f"{len(steps)} trunk snapshots", f"{len(st.run.branch_names())} branches",
-                 f"basis {info['id']}" if info else "no basis yet",
-                 f"{n_pts} / {ctl['budget']} grid points evaluated",
+                 f"{len(steps)} snapshots", f"{len(st.run.branch_names())} branches",
+                 f"{n_pts} / {ctl['budget']} grid points" if info else "no basis yet",
                  f"worker {ws.get('state', 'not running') if ws['alive'] else 'not running'}"]
         if ws.get("error"):
             parts.append(f"landscape disabled: {ws['error']}")
@@ -499,11 +548,11 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         sig = [info["id"] if info else None, n_pts, {k: len(v["steps"]) for k, v in view.get("proj", {}).items()},
                sel, mode, resolution, sorted(display), series, metric_sig]
         if sig == old_sig:
-            return no_update, no_update, no_update, no_update, status, label, no_update
+            return no_update, no_update, no_update, no_update, status, label, no_update, no_update, no_update
         level = RESOLUTIONS.get(int(resolution or 33), 2)
         return (map_figure(st, view, sel, level, "zlog" in display, "clip" in display),
                 fidelity_figure(st, view, sel), fidelity_panel(view, sel), metrics_figure(st, series or []),
-                status, label, sig)
+                status, label, *fidelity_chip(view), sig)
 
     @app.callback(Output("click-panel", "children"), Output("export", "style"), Output("clicked", "data"),
                   Input("map", "clickData"), State("mode", "value"), prevent_initial_call=True)
@@ -526,13 +575,37 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
                 ("Eval samples", str(res["n"])), ("BatchNorm statistics", res["bn_mode"])]
         if pt.get("z") is not None:
             rows.append(("Surface value at click", _fmt(float(pt["z"]), 5)))
-        panel = [html.Span("IN-PLANE APPROXIMATION", className="tag"),
-                 html.Table([html.Tr([html.Td(k), html.Td(v)]) for k, v in rows], className="kv", style={"marginTop": "8px"}),
+        panel = [html.Table([html.Tr([html.Td(k), html.Td(v)]) for k, v in rows], className="kv", style={"marginTop": "8px"}),
                  html.Div("These weights are center + a·d1 + b·d2, reconstructed from the 2D basis. They are not a "
                           "recorded snapshot, and a snapshot drawn at this spot generally has different weights and loss.",
                           className="note", style={"marginTop": "8px"}),
 ]
         return panel, {"display": "inline-block"}, {"key": f"{info['id']}:{a}:{b}", "a": a, "b": b, "basis": info["id"]}
+
+    @app.callback(Output("popup", "className"), Input("click-panel", "children"), Input("popup-close", "n_clicks"),
+                  prevent_initial_call=True)
+    def toggle_popup(children, _close):
+        return "popup" if ctx.triggered_id == "popup-close" or not children else "popup open"
+
+    @app.callback(Output("drawer", "className"), Input("settings-btn", "n_clicks"), Input("drawer-close", "n_clicks"),
+                  State("drawer", "className"), prevent_initial_call=True)
+    def toggle_drawer(_open, _close, cls):
+        return "drawer" if ctx.triggered_id == "drawer-close" or "open" in (cls or "") else "drawer open"
+
+    @app.callback(Output("page-map", "style"), Output("page-fidelity", "style"), Output("page-metrics", "style"),
+                  Output("nav-map", "className"), Output("nav-fidelity", "className"), Output("nav-metrics", "className"),
+                  Input("nav-map", "n_clicks"), Input("nav-fidelity", "n_clicks"), Input("nav-metrics", "n_clicks"),
+                  Input("fidelity-chip", "n_clicks"), prevent_initial_call=True)
+    def navigate(*_):
+        page = {"nav-fidelity": "fidelity", "fidelity-chip": "fidelity", "nav-metrics": "metrics"}.get(ctx.triggered_id, "map")
+        shown = [{"display": "block" if page == p else "none"} for p in ("map", "fidelity", "metrics")]
+        return (*shown, *("nav on" if page == p else "nav" for p in ("map", "fidelity", "metrics")))
+
+    # Plots on a page that was hidden when they rendered need a resize once the page is shown.
+    app.clientside_callback(
+        "function(_s){setTimeout(function(){window.dispatchEvent(new Event('resize'));},60);"
+        "return window.dash_clientside.no_update;}",
+        Output("page-map", "title"), Input("page-map", "style"), prevent_initial_call=True)
 
     @app.callback(Output("download", "data"), Input("export", "n_clicks"), State("clicked", "data"),
                   prevent_initial_call=True)
