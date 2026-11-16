@@ -70,8 +70,9 @@ def test_next_exploration_avoids_the_previous_one(run):
 
 
 def test_time_mode_stops_at_the_deadline(run):
-    done = improve_map(run, "time", minutes=0.01, config={**CFG, "plateau_tol": -1e9}, landscape=False, metrics=False)
-    assert len(done) >= 1
+    done = improve_map(run, "time", minutes=0.01, config={**CFG, "plateau_tol": -1e9, "target_ratio": 0.0, "max_steps": 10 ** 9},
+                       landscape=False, metrics=False)
+    assert len(done) == 1  # only the deadline can end this descent
     assert done[-1].info()["stopped"] == "time budget"
     assert improve_status(run.dir)["result"] == "time budget used"
     with pytest.raises(ValueError):

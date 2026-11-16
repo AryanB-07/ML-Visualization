@@ -151,7 +151,7 @@ Start and Stop.
   initialization instead (the one farthest from all stored snapshots).
 - **When a descent stops.** At the first of: recent loss within 5% of the
   trunk's final loss level, a plateau (two windows without 2% improvement),
-  the trunk's step count, 120 s per exploration (`-c max_seconds_each=...`),
+  the trunk's step count (`-c max_steps=...`), 120 s per exploration (`-c max_seconds_each=...`),
   the time budget, or Stop.
 - **What it trains with.** Plain SGD on `dataset_factory`, with `lr`,
   `momentum`, `weight_decay` and `batch_size` read from the run's `config`

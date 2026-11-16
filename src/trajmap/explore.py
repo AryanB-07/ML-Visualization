@@ -53,7 +53,9 @@ from .tracer import Recorder
 REGION_PAD = 0.35     # the search region is the trunk/branch bounding box grown by this fraction
 AUTO_MIN_GAP = 0.12   # auto mode stops when the best start is closer than this fraction of the region diagonal
 DEFAULTS: dict[str, Any] = {"lr": 0.05, "momentum": 0.9, "weight_decay": 0.0, "batch_size": 128,
-                            "max_seconds_each": 120.0, "grad_clip": 10.0, "plateau_tol": 0.02, "extra_budget": 150}
+                            "max_seconds_each": 120.0, "grad_clip": 10.0, "plateau_tol": 0.02, "extra_budget": 150,
+                            "max_steps": None,       # None = as many steps as the trunk took
+                            "target_ratio": 1.05}    # stop once recent loss <= ratio * trunk's final loss level
 
 
 # ------------------------------------------------------------------ start points
@@ -123,7 +125,7 @@ def explore_once(run: Run, start: dict[str, Any], name: str | None = None, confi
         raise RuntimeError("exploration needs the training data: pass dataset_factory='module:fn' to Tracer")
     cfg = {**DEFAULTS, **{k: v for k, v in (meta.get("config") or {}).items() if k in DEFAULTS}, **(config or {})}
     every = int(run.trunk.info().get("every_n_steps", 50))
-    max_steps = int(max_steps or run.trunk.info().get("last_step") or (run.trunk.steps() or [1000])[-1])
+    max_steps = int(max_steps or cfg["max_steps"] or run.trunk.info().get("last_step") or (run.trunk.steps() or [1000])[-1])
     window = max(100, 4 * every)
     target = trunk_loss_level(run, window)
     if name is None:
@@ -176,7 +178,7 @@ def explore_once(run: Run, start: dict[str, Any], name: str | None = None, confi
                 reason = "time budget"
             elif now >= t_end:
                 reason = "time limit per exploration"
-            elif n >= window and target is not None and recent <= 1.05 * target:
+            elif n >= window and target is not None and recent <= cfg["target_ratio"] * target:
                 reason = "reached trunk loss level"
             elif n >= 2 * window and n % window == 0:
                 # plateau = two windows in a row without a real improvement over the window before
