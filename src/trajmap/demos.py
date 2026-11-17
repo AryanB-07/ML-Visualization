@@ -232,7 +232,7 @@ def list_runs(root: str | Path) -> list[dict[str, Any]]:
         meta = read_json(d / "meta.json")
         if not meta:
             continue
-        trunk = read_json(d / "trunk" / "info.json", {}) or {}
+        trunk = read_json(d / "trunk" / "trajectory.json", {}) or {}
         out.append({"name": d.name, "dir": d, "created": meta.get("created", 0),
                     "demo": (meta.get("config") or {}).get("demo"), "finished": bool(trunk.get("finished"))})
     return sorted(out, key=lambda r: -r["created"])

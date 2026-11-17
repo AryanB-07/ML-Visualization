@@ -20,6 +20,7 @@ from plotly.subplots import make_subplots
 from scipy.ndimage import binary_dilation
 
 from .basis import MODES, BasisManager
+from .demos import PRESETS, list_presets, list_runs, start_demo, unique_run_name
 from .landscape import RESOLUTIONS, Evaluator, GridCache, SurfaceModel, grid_bounds, unit
 from .store import TRUNK, Run, atomic_write_json
 from .worker import ensure_worker, worker_status
@@ -97,6 +98,15 @@ button.ghost:hover { background:rgba(61,123,255,.14); color:#fff; }
 .top .status { flex:1; text-align:right; }
 .top h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
 .top h1 span { color:var(--accent-soft); font-weight:500; }
+.top { gap:10px 14px; }
+.run-select { width:270px; font-size:13px; }
+.top .status { flex:1 1 260px; min-width:0; font-size:11.5px; line-height:1.35; }
+.run-select .Select-control, .run-select .dash-dropdown { background:rgba(10,16,34,.7); }
+.drawer.wide { width:400px; }
+.presets input[type=radio] { margin-top:3px; }
+.preset-title { font-weight:600; font-size:13px; color:var(--text); }
+.presets .note { margin-top:3px; }
+.preset-cost { font-size:11.5px; color:var(--accent-soft); margin-top:4px; }
 .status { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
 label.ctl { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
 .note { font-size:12px; color:var(--muted); line-height:1.5; }
@@ -414,13 +424,113 @@ def metrics_figure(st: DashboardState, selected: list[str]) -> go.Figure:
 
 
 # -------------------------------------------------------------------------- app
-def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu", start_worker: bool = True) -> Dash:
-    st = DashboardState(run_dir, device)
-    app = Dash(__name__, title=f"trajmap · {Path(run_dir).name}", update_title=None)
+class _Runs:
+    """The runs under one root folder and which one the dashboard shows (one DashboardState each)."""
+
+    def __init__(self, path: str | Path, device: str):
+        path = Path(path)
+        if (path / "meta.json").exists():
+            self.root, first = path.parent, path.name
+        else:
+            self.root = path
+            self.root.mkdir(parents=True, exist_ok=True)
+            runs = list_runs(self.root)
+            first = runs[0]["name"] if runs else None
+        self.device = device
+        self.states: dict[str, DashboardState] = {}
+        self.name: str | None = None
+        if first:
+            self.switch(first)
+
+    def switch(self, name: str) -> None:
+        if name not in self.states:
+            self.states[name] = DashboardState(self.root / name, self.device)
+        self.name = name
+
+    @property
+    def st(self) -> DashboardState:
+        if self.name is None:
+            raise LookupError("no run selected")
+        return self.states[self.name]
+
+
+class _StateProxy:
+    """Stands in for the current run's DashboardState inside callbacks, so switching runs needs no rewiring."""
+
+    def __init__(self, runs: _Runs):
+        self._runs = runs
+
+    def __getattr__(self, k: str) -> Any:
+        return getattr(self._runs.st, k)
+
+
+def _run_options(runs: _Runs) -> list[dict[str, str]]:
+    out = []
+    for r in list_runs(runs.root):
+        title = PRESETS[r["demo"]].title if r["demo"] in PRESETS else None
+        label = r["name"] + (f" · {title}" if title and title.lower() != r["name"] else "")
+        out.append({"label": label + ("" if r["finished"] else " · training"), "value": r["name"]})
+    return out
+
+
+def _new_run_drawer() -> html.Div:
+    presets = list_presets()
+    return html.Div([
+        html.Div([html.H2("New run"), html.Button("Close", id="newrun-close", className="ghost", n_clicks=0)],
+                 className="drawer-head"),
+        html.Div("Train a ready-made dataset and model in the background and watch its map form. "
+                 "Each run is saved next to the others and stays in the run menu.", className="note"),
+        html.H3("Setup"),
+        dcc.RadioItems(id="newrun-preset", value=presets[0].name, className="presets", options=[
+            {"value": p.name, "label": html.Div([
+                html.Div(p.title, className="preset-title"),
+                html.Div(p.description, className="note"),
+                html.Div(" · ".join(x for x in (p.cost, (f"downloads {p.download} first" if p.download
+                                                          and not p.data_ready() else "")) if x),
+                         className="preset-cost")])} for p in presets],
+            labelStyle={"display": "flex", "gap": "8px", "alignItems": "flex-start", "margin": "0 0 12px"}),
+        html.H3("Options"),
+        dcc.Checklist(id="newrun-opts", value=["watch", "extras"], options=[
+            {"label": " Slow training down so the map forms while you watch", "value": "watch"},
+            {"label": " Afterwards add an unlearning branch and two explorations", "value": "extras"}],
+            labelStyle={"display": "block", "margin": "3px 0"}),
+        html.Label("Run name (optional)", className="ctl"),
+        dcc.Input(id="newrun-name", type="text", placeholder="defaults to the setup name",
+                  style={"width": "100%", "boxSizing": "border-box", "padding": "6px"}),
+        html.Button("Train", id="newrun-go", className="btn", n_clicks=0),
+        html.Div(id="newrun-status", className="note", style={"marginTop": "10px", "wordBreak": "break-word"}),
+    ], id="newrun", className="drawer wide")
+
+
+def build_app(run_dir: str | Path = "runs", interval_ms: int = 2000, device: str = "cpu",
+              start_worker: bool = True) -> Dash:
+    runs = _Runs(run_dir, device)
+    st = _StateProxy(runs)
+    app = Dash(__name__, title="trajmap", update_title=None, suppress_callback_exceptions=True)
     app.index_string = app.index_string.replace("{%css%}", "{%css%}<style>" + CSS + "</style>")
     exports: dict[str, Any] = {}
 
+    def top_bar(*extra: Any) -> html.Div:
+        return html.Div([
+            html.H1([html.Span("trajmap /")]),
+            dcc.Dropdown(id="run-select", value=runs.name, options=_run_options(runs), clearable=False,
+                         searchable=False, placeholder="no runs yet", className="run-select"),
+            html.Button("New run", id="newrun-btn", className="ghost", n_clicks=0),
+            *extra,
+        ], className="top")
+
+    def chrome() -> list[Any]:
+        """Pieces shared by the run layout and the empty one."""
+        return [dcc.Interval(id="clock", interval=1500), dcc.Store(id="pending"), dcc.Store(id="reload"),
+                _new_run_drawer()]
+
     def layout() -> html.Div:
+        if runs.name is None:
+            return html.Div([*chrome(), top_bar(html.Div(className="status")), html.Div([
+                html.Div([html.H3("No runs yet"),
+                          html.Div("Start one with New run (top right), or record your own training loop with "
+                                   "Tracer and point the dashboard at its folder.", className="note")],
+                         className="card", style={"maxWidth": "520px", "margin": "60px auto"})], className="pages")])
         ctl = st.run.control()
         opts = metric_options(st)
         default_series = [o for o in opts if o in ("nearest_trunk / nearest_trunk_step", "off_path / off_path_distance")]
@@ -491,15 +601,14 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         return html.Div([
             dcc.Interval(id="tick", interval=interval_ms),
             dcc.Store(id="sig"), dcc.Store(id="ctl-sink"), dcc.Store(id="clicked"), dcc.Download(id="download"),
-            html.Div([
-                html.H1([html.Span("trajmap / "), Path(run_dir).name]),
-                html.Div([html.Button("Map", id="nav-map", className="nav on", n_clicks=0),
-                          html.Button("Fidelity", id="nav-fidelity", className="nav", n_clicks=0),
-                          html.Button("Branch metrics", id="nav-metrics", className="nav", n_clicks=0)], className="navs"),
-                html.Div(id="status", className="status"),
-                html.Button("Improve map", id="improve-btn", className="ghost", n_clicks=0),
-                html.Button("Settings", id="settings-btn", className="ghost", n_clicks=0),
-            ], className="top"),
+            *chrome(),
+            top_bar(html.Div([html.Button("Map", id="nav-map", className="nav on", n_clicks=0),
+                              html.Button("Fidelity", id="nav-fidelity", className="nav", n_clicks=0),
+                              html.Button("Branch metrics", id="nav-metrics", className="nav", n_clicks=0)],
+                             className="navs"),
+                    html.Div(id="status", className="status"),
+                    html.Button("Improve map", id="improve-btn", className="ghost", n_clicks=0),
+                    html.Button("Settings", id="settings-btn", className="ghost", n_clicks=0)),
             settings,
             html.Div([
                 html.Div([html.H2("Improve map"), html.Button("Close", id="improve-close", className="ghost", n_clicks=0)],
@@ -675,6 +784,53 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
         "return window.dash_clientside.no_update;}",
         Output("page-map", "title"), Input("page-map", "style"), prevent_initial_call=True)
 
+    # ---- runs: switch, list, start new ones
+    @app.callback(Output("reload", "data", allow_duplicate=True), Input("run-select", "value"), prevent_initial_call=True)
+    def select_run(name):
+        if not name or name == runs.name or not (runs.root / name / "meta.json").exists():
+            return no_update
+        runs.switch(name)
+        exports.clear()
+        return time.time()
+
+    app.clientside_callback("function(r){ if (r) { window.location.reload(); } return window.dash_clientside.no_update; }",
+                            Output("run-select", "title"), Input("reload", "data"), prevent_initial_call=True)
+
+    @app.callback(Output("newrun", "className"), Input("newrun-btn", "n_clicks"), Input("newrun-close", "n_clicks"),
+                  State("newrun", "className"), prevent_initial_call=True)
+    def toggle_newrun(_open, _close, cls):
+        return "drawer wide" if ctx.triggered_id == "newrun-close" or "open" in (cls or "") else "drawer wide open"
+
+    @app.callback(Output("pending", "data"), Output("newrun-status", "children"), Output("run-select", "options"),
+                  Output("reload", "data", allow_duplicate=True),
+                  Input("clock", "n_intervals"), Input("newrun-go", "n_clicks"),
+                  State("newrun-preset", "value"), State("newrun-opts", "value"), State("newrun-name", "value"),
+                  State("pending", "data"), State("run-select", "options"), prevent_initial_call=True)
+    def new_run(_tick, _go, preset, opts, name, pending, old_opts):
+        opts_now = _run_options(runs)
+        options = opts_now if opts_now != old_opts else no_update
+        if ctx.triggered_id == "newrun-go" and preset:
+            base = "".join(c for c in (name or preset).strip() if c.isalnum() or c in "-_.") or preset
+            name = unique_run_name(runs.root, base)
+            log = start_demo(preset, runs.root / name, watch="watch" in (opts or []),
+                             extras="extras" in (opts or []), device=device)
+            return {"name": name, "log": str(log), "t": time.time()}, f"Starting {name}…", options, no_update
+        if not pending:
+            return no_update, no_update, options, no_update
+        if (runs.root / pending["name"] / "trunk" / "trajectory.json").exists():
+            runs.switch(pending["name"])
+            exports.clear()
+            return None, f"Started {pending['name']}.", options, time.time()
+        try:
+            tail = Path(pending["log"]).read_text()[-4000:]
+        except OSError:
+            tail = ""
+        if "Traceback" in tail:
+            return None, html.Pre(tail[-1200:], className="warn", style={"whiteSpace": "pre-wrap"}), options, no_update
+        pct = tail.rsplit("%", 1)[0].rsplit("%", 1)[-1][-5:] if tail.rstrip().endswith("%") else None
+        msg = f"Downloading data… {pct.strip()}%" if pct else "Loading data and building the model…"
+        return no_update, f"Starting {pending['name']}: {msg} ({time.time() - pending['t']:.0f}s)", options, no_update
+
     @app.callback(Output("download", "data"), Input("export", "n_clicks"), State("clicked", "data"),
                   prevent_initial_call=True)
     def export(n, clicked):
@@ -691,7 +847,7 @@ def build_app(run_dir: str | Path, interval_ms: int = 2000, device: str = "cpu",
     return app
 
 
-def serve(run_dir: str | Path, host: str = "127.0.0.1", port: int = 8050, interval_ms: int = 2000,
+def serve(run_dir: str | Path = "runs", host: str = "127.0.0.1", port: int = 8050, interval_ms: int = 2000,
           device: str = "cpu", debug: bool = False) -> None:
     app = build_app(run_dir, interval_ms=interval_ms, device=device)
     print(f"trajmap dashboard for {run_dir}: http://{host}:{port}")
