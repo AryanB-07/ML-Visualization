@@ -46,6 +46,32 @@ tracer metrics runs/mnist --branch gradient_ascent-from1000
 In the dashboard, switch the basis to "PCA, trunk + branches" to fit the plane
 on both.
 
+## Demo setups
+
+Ready-made dataset + model + recipe presets, for seeing what the map looks
+like beyond MNIST. Open the dashboard on the `runs` folder and press
+**New run**, or use the CLI:
+
+```bash
+tracer dashboard                      # opens runs/; the run menu switches between runs
+tracer demo list
+tracer demo grokking --watch --extras # --watch: slow enough to see the map form;
+                                      # --extras: then an unlearning branch and two explorations
+```
+
+| Preset | Dataset and model | What to look for | CPU time |
+|---|---|---|---|
+| `spirals` | three interleaved 2D spirals, tanh MLP (9k params) | a long plateau, then a sudden drop; a rugged surface with ridges and saddles | seconds |
+| `grokking` | (a + b) mod 97 from 40% of pairs, embedding MLP, AdamW with weight decay 1.0 | the map uses held-out pairs, so test loss first *rises* while the net memorizes, then falls as it generalizes | ~10 s |
+| `mnist` | MNIST, 3-layer MLP | a smooth, nearly convex bowl (the baseline) | ~20 s |
+| `fashion` | Fashion-MNIST, two-block CNN | conv filters; a less trivial bowl | ~30 s |
+| `cifar_cnn` | CIFAR-10 (20k-image subset), VGG-style CNN with BatchNorm | real images; BatchNorm statistics re-estimated at every map point | a few minutes |
+| `cifar_resnet18` | CIFAR-10, ResNet-18 (11M params), float16 snapshots | the heavy one: use `--device cuda` or `mps` | 30+ min on CPU |
+
+MNIST, Fashion-MNIST and CIFAR-10 download into `data/` on first use (about
+12, 30 and 170 MB). The presets live in `trajmap/demos.py`; add your own by
+adding a `Preset` to `PRESETS`.
+
 ### Hooking into your own loop
 
 ```python
@@ -246,7 +272,8 @@ Built in:
 ## CLI
 
 ```
-tracer dashboard RUN [--port 8050] [--interval 2]
+tracer dashboard [RUN or FOLDER, default runs] [--port 8050] [--interval 2]
+tracer demo      list | PRESET [--run-dir DIR] [--watch] [--extras] [--steps N] [--device cpu]
 tracer unlearn   RUN --method NAME --from-step N [--branch NAME] [--every K] [-c key=value ...] [--plugin MODULE]
 tracer metrics   RUN --branch NAME [--metric NAME ...] [--plugin MODULE]
 tracer improve   RUN [--auto | --minutes M] [--max-runs N] [--start plane|init] [-c key=value ...]

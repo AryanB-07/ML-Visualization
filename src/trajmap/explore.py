@@ -16,10 +16,11 @@ Start points (``start=``)
             numbers will show.
 
 Descent
-    Plain SGD on the run's ``dataset_factory`` with lr / momentum /
-    weight_decay / batch_size taken from the run's config (overridable).  It
-    is not your training loop: schedules, augmentation and custom optimizers
-    are not reproduced.  An exploration stops at the first of: recent loss
+    SGD (or AdamW when the run's config says ``optimizer: adamw``) on the
+    run's ``dataset_factory``, with lr / momentum / weight_decay / batch_size
+    taken from the run's config (overridable).  It is not your training loop:
+    schedules, augmentation and custom optimizers are not reproduced.  An
+    exploration stops at the first of: recent loss
     reaches the trunk's final loss level, the loss plateaus, ``max_steps``,
     the per-exploration time limit, the overall time budget, or a stop request.
 
@@ -52,7 +53,7 @@ from .tracer import Recorder
 
 REGION_PAD = 0.35     # the search region is the trunk/branch bounding box grown by this fraction
 AUTO_MIN_GAP = 0.12   # auto mode stops when the best start is closer than this fraction of the region diagonal
-DEFAULTS: dict[str, Any] = {"lr": 0.05, "momentum": 0.9, "weight_decay": 0.0, "batch_size": 128,
+DEFAULTS: dict[str, Any] = {"optimizer": "sgd", "lr": 0.05, "momentum": 0.9, "weight_decay": 0.0, "batch_size": 128,
                             "max_seconds_each": 120.0, "grad_clip": 10.0, "plateau_tol": 0.02, "extra_budget": 150,
                             "max_steps": None,       # None = as many steps as the trunk took
                             "target_ratio": 1.05}    # stop once recent loss <= ratio * trunk's final loss level
@@ -144,7 +145,8 @@ def explore_once(run: Run, start: dict[str, Any], name: str | None = None, confi
     writer = run.create_exploration(name, start["params"], start.get("buffers"), start.get("int_buffers"),
                                     method="sgd_descent", config=cfg, every_n_steps=every, **info)
     rec = Recorder(model, writer, every, initial_snapshot=False)
-    opt = torch.optim.SGD(model.parameters(), lr=cfg["lr"], momentum=cfg["momentum"], weight_decay=cfg["weight_decay"])
+    from .demos import make_optimizer
+    opt = make_optimizer(cfg["optimizer"], model.parameters(), cfg["lr"], cfg["momentum"], cfg["weight_decay"])
     loss_fn = run.loss_fn()
     ds = resolve(meta["dataset_factory"])(**(meta.get("dataset_kwargs") or {}))
     loader = DataLoader(ds, batch_size=int(cfg["batch_size"]), shuffle=True,
