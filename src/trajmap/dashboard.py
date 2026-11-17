@@ -17,7 +17,6 @@ import plotly.graph_objects as go
 import torch
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from plotly.subplots import make_subplots
-from scipy.ndimage import binary_dilation
 
 from .basis import MODES, BasisManager
 from .demos import PRESETS, list_presets, list_runs, start_demo, unique_run_name
@@ -32,9 +31,12 @@ ACCENT, ACCENT_SOFT = "#3d7bff", "#8fb4ff"
 TRUNK_COLOR = "#ffffff"
 BRANCH_COLORS = ["#d95926", "#9085e9", "#d55181"]  # validated on the dark surface; no greens
 EXPLORE_COLOR = "#c98500"                           # every exploration shares one colour
-LOSS_SCALE = [[0.0, "#040816"], [0.55, "#0a1c52"], [1.0, "#173a96"]]   # one hue, dark -> bright with loss
-GRAY_SCALE = [[0.0, "#080c18"], [1.0, "#121a30"]]
-WIRE_EVAL, WIRE_INTERP = "rgba(96,150,255,0.95)", "rgba(110,130,185,0.26)"
+LOSS_SCALE = [[0.0, "#030712"], [0.55, "#0a1a4a"], [1.0, "#16348a"]]   # one hue, dark -> bright with loss
+# One surface trace, two colour ramps: evaluated cells use the loss ramp, interpolated cells a dim
+# desaturated ramp.  ``surfacecolor`` is the loss mapped to [0.5, 1] or [0, 0.5) accordingly.
+SPLIT_SCALE = ([[0.0, "#05070e"], [0.4999, "#151c2e"]] +
+               [[0.5 + 0.5 * f, c] for f, c in LOSS_SCALE])
+WIRE = "rgba(118,162,255,0.9)"           # lighter tint of the accent: reads against the dark fill
 MODE_LABELS = {"pca_trunk": "PCA, trunk only", "pca_joint": "PCA, trunk + branches",
                "random": "Random, filter-normalized"}
 FONT = dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif", size=12, color=INK)
@@ -91,7 +93,7 @@ button.ghost:hover { background:rgba(61,123,255,.14); color:#fff; }
 .card + .card { margin-top:12px; }
 .map-card { padding:0; overflow:hidden; position:relative;
   background:
-    radial-gradient(ellipse 62% 50% at 50% 34%, rgba(70,130,255,.72), rgba(24,56,170,.40) 42%, rgba(6,9,19,0) 78%),
+    radial-gradient(ellipse 70% 55% at 50% 30%, rgba(60,115,255,.26), rgba(24,56,170,.12) 45%, rgba(6,9,19,0) 80%),
     linear-gradient(#070b18, #04060c); }
 .map-card .below { padding:4px 14px 12px; }
 .top { padding:12px 16px 0; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
@@ -229,7 +231,7 @@ def map_figure(st: DashboardState, view: dict[str, Any], sel_step: int | None, l
             zcap = 2.0 * max(float(v.max()) for v in path_zs.values())
             z = np.minimum(z, zcap)
         zlo, zhi = float(z.min()), float(z.max())
-        lift = 0.012 * (zhi - zlo)
+        lift = 0.03 * (zhi - zlo)   # keeps paths above the mesh between grid nodes
         sup = mesh["supported"]
 
         def wire(color: str) -> dict[str, Any]:
@@ -237,21 +239,23 @@ def map_figure(st: DashboardState, view: dict[str, Any], sel_step: int | None, l
                 return dict(show=True, start=float(v[0]), end=float(v[-1]), size=float(v[1] - v[0]),
                             color=color, width=1, highlight=False)
             return dict(x=ax(mesh["a"]), y=ax(mesh["b"]), z=dict(show=False, highlight=False))
-        hover = "a %{x:.3g}, b %{y:.3g}<br>loss %{z:.4g}<extra>" 
+        # A single trace: two overlapping surfaces z-fight and leave stair-stepped holes at their seam.
+        span = max(zhi - zlo, 1e-12)
+        frac = (z - zlo) / span
+        sc = np.where(sup, 0.5 + 0.5 * frac, 0.4999 * frac)
         fig.add_trace(go.Surface(
-            x=mesh["a"], y=mesh["b"], z=np.where(sup, z, np.nan), colorscale=LOSS_SCALE, cmin=zlo, cmax=zhi,
-            name="Surface, evaluated", showlegend=True, hovertemplate=hover + "near an evaluated point</extra>",
-            contours=wire(WIRE_EVAL),
-            colorbar=dict(title=dict(text="loss", side="right"), thickness=8, len=0.5, x=0.97, outlinewidth=0,
-                          tickfont=dict(color=MUTED, size=10)),
-            lighting=dict(ambient=0.9, diffuse=0.35, specular=0.0, roughness=1.0)))
-        interp = binary_dilation(~sup)
-        if interp.any():
-            fig.add_trace(go.Surface(
-                x=mesh["a"], y=mesh["b"], z=np.where(interp, z, np.nan), colorscale=GRAY_SCALE, showscale=False,
-opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlegend=True,
-                hovertemplate=hover + "interpolated, not evaluated</extra>",
-                lighting=dict(ambient=1.0, diffuse=0.0, specular=0.0)))
+            x=mesh["a"], y=mesh["b"], z=z, surfacecolor=sc, customdata=np.where(sup, 1, 0),
+            colorscale=SPLIT_SCALE, cmin=0.0, cmax=1.0, showscale=False, name="Surface (dim = interpolated)",
+            showlegend=True, contours=wire(WIRE),
+            hovertemplate="a %{x:.3g}, b %{y:.3g}<br>loss %{z:.4g}<extra></extra>",
+            lighting=dict(ambient=0.85, diffuse=0.45, specular=0.05, roughness=0.9, fresnel=0.1),
+            lightposition=dict(x=-2000, y=-5000, z=10000)))
+        # Colour bar for the loss ramp alone (the surface's own bar would show the split scale).
+        fig.add_trace(go.Scatter3d(
+            x=[mesh["a"][0]], y=[mesh["b"][0]], z=[zlo], mode="markers", hoverinfo="skip", showlegend=False,
+            marker=dict(size=0.1, opacity=0, color=[zlo], colorscale=LOSS_SCALE, cmin=zlo, cmax=zhi, showscale=True,
+                        colorbar=dict(title=dict(text="loss", side="right"), thickness=8, len=0.5, x=0.97,
+                                      outlinewidth=0, tickfont=dict(color=MUTED, size=10)))))
         u = unit(info["coarse_h"])
         keys = [k for k, v in points.items() if v[0] is not None]
         pz = np.array([points[k][0] for k in keys])
@@ -259,7 +263,7 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
             pz = np.minimum(pz, zcap)
         fig.add_trace(go.Scatter3d(
             x=[k[0] * u for k in keys], y=[k[1] * u for k in keys], z=pz, mode="markers",
-            marker=dict(size=1.5, color="#cfe0ff", opacity=0.75), name=f"Evaluated grid points ({len(keys)})",
+            marker=dict(size=1.2, color="#cfe0ff", opacity=0.35), name=f"Evaluated grid points ({len(keys)})",
             hovertemplate="a %{x:.3g}, b %{y:.3g}<br>loss %{z:.4g}<extra>evaluated</extra>"))
 
     def hover_text(name: str, p: dict[str, Any]) -> list[str]:
@@ -271,11 +275,11 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
     ta, tb, ts = np.array(trunk["a"]), np.array(trunk["b"]), np.array(trunk["steps"])
     upto = ts <= sel_step
     if (~upto).any():
-        fig.add_trace(go.Scatter3d(x=ta, y=tb, z=tz, mode="lines", line=dict(color="rgba(255,255,255,0.28)", width=3),
+        fig.add_trace(go.Scatter3d(x=ta, y=tb, z=tz, mode="lines", line=dict(color="rgba(255,255,255,0.35)", width=4),
                                    name="Trunk (after selected step)", hoverinfo="skip"))
     fig.add_trace(go.Scatter3d(
-        x=ta[upto], y=tb[upto], z=tz[upto], mode="lines+markers", line=dict(color=TRUNK_COLOR, width=6),
-        marker=dict(size=3, color=TRUNK_COLOR), name="Trunk (training)",
+        x=ta[upto], y=tb[upto], z=tz[upto], mode="lines+markers", line=dict(color=TRUNK_COLOR, width=8),
+        marker=dict(size=3.5, color=TRUNK_COLOR), name="Trunk (training)",
         text=[t for t, k in zip(hover_text(TRUNK, trunk), upto) if k], hovertemplate="%{text}<extra></extra>"))
     explores = [n for n, c in colors.items() if c == EXPLORE_COLOR and n in proj and proj[n]["steps"]]
     for name, p in proj.items():
@@ -287,7 +291,7 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
         if is_exp:
             sizes[0] = 7  # where the exploration started
         fig.add_trace(go.Scatter3d(
-            x=p["a"], y=p["b"], z=path_zs[name] + lift, mode="lines+markers", line=dict(color=c, width=4 if is_exp else 5),
+            x=p["a"], y=p["b"], z=path_zs[name] + lift, mode="lines+markers", line=dict(color=c, width=5 if is_exp else 7),
             marker=dict(size=sizes, color=c, symbol="diamond" if is_exp else "circle"),
             name=f"Explorations ({len(explores)})" if is_exp else f"Branch {name}",
             legendgroup="explore" if is_exp else name, showlegend=(not is_exp) or name == explores[0],
@@ -296,7 +300,7 @@ opacity=0.55, contours=wire(WIRE_INTERP), name="Surface, interpolated", showlege
     fig.add_trace(go.Scatter3d(x=[ta[k]], y=[tb[k]], z=[tz[k]], mode="markers",
                                marker=dict(size=7, color=ACCENT, line=dict(color="#ffffff", width=3)),
                                name=f"Selected snapshot (step {int(ts[k])})", hoverinfo="skip"))
-    axis = dict(showbackground=False, gridcolor="rgba(140,165,255,0.10)", zerolinecolor="rgba(140,165,255,0.18)",
+    axis = dict(showbackground=False, gridcolor="rgba(140,165,255,0.07)", zerolinecolor="rgba(140,165,255,0.18)",
                 showspikes=False, tickfont=dict(color=MUTED, size=10), title_font=dict(color=MUTED, size=11),
                 linecolor="rgba(140,165,255,0.25)")
     fig.update_layout(
