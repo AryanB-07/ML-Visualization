@@ -1,4 +1,4 @@
-"""Command line: ``tracer dashboard | unlearn | metrics | improve | info``."""
+"""Command line: ``tracer dashboard | demo | unlearn | metrics | improve | info``."""
 from __future__ import annotations
 
 import argparse
@@ -29,11 +29,14 @@ def main(argv: list[str] | None = None) -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("dashboard", help="open the live dashboard for a run directory")
-    d.add_argument("run_dir")
+    d.add_argument("run_dir", nargs="?", default="runs",
+                   help="a run, or a folder of runs (default: runs); you can switch between sibling runs")
     d.add_argument("--host", default="127.0.0.1")
     d.add_argument("--port", type=int, default=8050)
     d.add_argument("--interval", type=float, default=2.0, help="refresh interval in seconds")
     d.add_argument("--device", default="cpu", help="device for evaluating clicked points")
+
+    sub.add_parser("demo", add_help=False, help="train a ready-made dataset + model preset ('tracer demo list')")
 
     u = sub.add_parser("unlearn", help="run an unlearning method from a trunk snapshot and record it as a branch")
     u.add_argument("run_dir")
@@ -65,6 +68,10 @@ def main(argv: list[str] | None = None) -> None:
     i = sub.add_parser("info", help="summarize a run directory")
     i.add_argument("run_dir")
 
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["demo"]:
+        from .demos import main as demo_main
+        return demo_main(argv[1:])
     a = ap.parse_args(argv)
     from .store import Run
 
